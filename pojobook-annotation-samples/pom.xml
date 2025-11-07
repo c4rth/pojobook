@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.c4rth</groupId>
+        <artifactId>pojobook-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>pojobook-annotation-samples</artifactId>
+    <packaging>jar</packaging>
+    <description>Sample applications demonstrating PojoBook usage with various COBOL copybook scenarios</description>
+    <dependencies>
+        <dependency>
+            <groupId>org.c4rth</groupId>
+            <artifactId>pojobook-serializer</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.c4rth</groupId>
+            <artifactId>pojobook-generator</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <!-- PojoBook Maven Plugin - Generate POJOs from copybooks -->
+            <plugin>
+                <groupId>org.c4rth</groupId>
+                <artifactId>pojobook-maven-plugin</artifactId>
+                <version>${project.version}</version>
+                <executions>
+                    <!-- Generate POJOs from all .cpy copybook files -->
+                    <execution>
+                        <id>generate-from-cpy-files</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <copybookFile>src/main/resources/copybooks/*.cpy</copybookFile>
+                            <packageName>org.c4rth.pojobook.samples.generated</packageName>
+                            <generatorType>annotation</generatorType>
+                        </configuration>
+                    </execution>
+
+                    <!-- Generate POJOs from all .cbl copybook files -->
+                    <execution>
+                        <id>generate-from-cbl-files</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <copybookFile>src/main/resources/copybooks/*.cbl</copybookFile>
+                            <packageName>org.c4rth.pojobook.samples.generated</packageName>
+                            <generatorType>annotation</generatorType>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
+</project>
