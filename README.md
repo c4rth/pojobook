@@ -13,18 +13,20 @@ PojoBook simplifies the integration between Java applications and COBOL systems 
 - **Multiple Approaches**: Choose between annotation-based (reflection) or embedded (no reflection) serialization
 - **Maven Integration**: Seamless code generation via Maven plugin
 
-PojoBook handles complex COBOL constructs including OCCURS clauses, REDEFINES, nested structures, and various data
+PojoBook handles COBOL constructs including OCCURS clauses, REDEFINES, nested structures, and various data
 types (COMP, COMP-3, PACKED-DECIMAL, etc.).
 
 ## Modules
 
 The project consists of five modules:
 
-- **pojobook-serializer**: Core serialization/deserialization engine (annotation-based approach)
+- **pojobook-core**: Core parser and serialization/deserialization engine (annotation-based approach)
 - **pojobook-generator**: POJO code generators from copybook definitions
 - **pojobook-maven-plugin**: Maven plugin for build-time code generation
 - **pojobook-annotation-samples**: Example usage with annotation-based approach
 - **pojobook-embedded-samples**: Example usage with embedded serialization approach
+
+The **private-samples** modules contain internal tests and is not part of the public distribution.
 
 ## Code Generation Approaches
 
@@ -33,14 +35,14 @@ PojoBook offers two distinct code generation strategies, each with different tra
 ### 1. Annotation-Based Generation
 
 Generates lightweight POJOs with `@CobolRecord` and `@CobolField` annotations. Serialization and deserialization are
-handled at runtime using reflection via the `CobolSerializerFacade` class.
+handled at runtime using reflection via the `CobolSerializer` class.
 
 **Characteristics:**
 
 - ✅ Simple, clean POJOs with minimal code
 - ✅ Flexible - easy to modify field mappings via annotations
 - ✅ Uses runtime reflection for serialization/deserialization
-- ✅ Requires `pojobook-serializer` dependency at runtime
+- ✅ Requires `pojobook-core` dependency at runtime
 - ❌ Slight runtime overhead due to reflection
 
 **Generated POJO Example:**
@@ -49,12 +51,10 @@ handled at runtime using reflection via the `CobolSerializerFacade` class.
 
 @CobolRecord
 public class EmployeeRecord {
-    @CobolField(name = "EMPLOYEE-ID", picture = "9(8)", type = CobolDataType.DISPLAY,
-            position = 0, length = 8)
+    @CobolField(name = "EMPLOYEE-ID", picture = "9(8)", type = CobolDataType.DISPLAY, position = 0, length = 8)
     private Integer employeeId = 0;
 
-    @CobolField(name = "FIRST-NAME", picture = "X(20)", type = CobolDataType.DISPLAY,
-            position = 8, length = 20)
+    @CobolField(name = "FIRST-NAME", picture = "X(20)", type = CobolDataType.DISPLAY, position = 8, length = 20)
     private String firstName = "";
 
     // Getters, setters, equals, hashCode, toString...
@@ -65,19 +65,15 @@ public class EmployeeRecord {
 
 ```java
 // Serialize
-CobolSerializerFacade facade = new CobolSerializerFacade(CharacterEncoding.CP1047);
+PojoBook pojoBook = new PojoBook();
 EmployeeRecord employee = new EmployeeRecord();
-employee.
+employee.setEmployeeId(12345);
+employee.setFirstName("JOHN");
 
-setEmployeeId(12345);
-employee.
-
-setFirstName("JOHN");
-
-byte[] cobolData = facade.serialize(employee);
+byte[] cobolData = pojoBook.serialize(employee);
 
 // Deserialize
-EmployeeRecord deserialized = facade.deserialize(cobolData, EmployeeRecord.class);
+EmployeeRecord deserialized = pojoBook.deserialize(cobolData, EmployeeRecord.class);
 ```
 
 ### 2. Embedded Serialization Generation
@@ -125,12 +121,8 @@ public class EmployeeRecord {
 ```java
 // Serialize
 EmployeeRecord employee = new EmployeeRecord();
-employee.
-
-setEmployeeId(12345);
-employee.
-
-setFirstName("JOHN");
+employee.setEmployeeId(12345);
+employee.setFirstName("JOHN");
 
 byte[] cobolData = employee.serialize();
 
@@ -153,14 +145,32 @@ EmployeeRecord deserialized = EmployeeRecord.deserialize(cobolData);
 
 ### Usage Clauses (Data Types)
 
-| COBOL Usage                  | Java Type                                          | Description                     | Encoding          |
-|------------------------------|----------------------------------------------------|---------------------------------|-------------------|
-| `DISPLAY`                    | `Integer`, `BigInteger`, `BigDecimal`, or `String` | Character representation        | ASCII or EBCDIC   |
-| `COMP` / `BINARY` / `COMP-4` | `Integer` or `BigInteger`                          | Binary integer                  | Binary            |
-| `COMP-1`                     | `Float`                                            | Single precision floating point | Binary (IEEE 754) |
-| `COMP-2`                     | `Double`                                           | Double precision floating point | Binary (IEEE 754) |
-| `COMP-3` / `PACKED-DECIMAL`  | `BigDecimal`                                       | Packed decimal (BCD)            | Binary (BCD)      |
-| `COMP-5`                     | `Integer` or `BigInteger`                          | Native binary                   | Binary            |
+| COBOL Usage                  | Java Type / Mapping (used by generators)                                                                     | Description                     | Encoding          |
+|------------------------------|--------------------------------------------------------------------------------------------------------------|---------------------------------|-------------------|
+| `DISPLAY`                    | `String` (for X/A), or numeric mapped according to picture (see rules below)                                 | Character representation        | ASCII or EBCDIC   |
+| `9(n)` / `S9(n)` (no V)      | `Short` (<=4 digits), `Integer` (5-9 digits), `Long` (10-18 digits), `BigInteger` (>18 digits)               | Integer numeric                 | Text or Binary    |
+| `9(n)V9(m)` / `S9(n)V9(m)`   | `BigDecimal` (scale = m, precision = n+m)                                                                    | Numeric with decimals           | Text or Binary    |
+| `X(n)` / `A(n)`              | `String`                                                                                                     | Alphanumeric / alphabetic       | ASCII or EBCDIC   |
+| `COMP` / `BINARY` / `COMP-4` | Binary integer mapped by digit-length: `Short` / `Integer` / `Long` / `BigInteger` (same thresholds as 9(n)) | Binary integer                  | Binary            |
+| `COMP-5`                     | Same as `COMP` (native binary): `Short` / `Integer` / `Long` / `BigInteger`                                  | Native binary                   | Binary            |
+| `COMP-1`                     | `Float`                                                                                                      | Single precision floating point | IEEE 754 (binary) |
+| `COMP-2`                     | `Double`                                                                                                     | Double precision floating point | IEEE 754 (binary) |
+| `COMP-3` / `PACKED-DECIMAL`  | `BigDecimal` (scale inferred from picture if `V` present)                                                    | Packed decimal (BCD)            | Packed BCD        |
+
+Notes and rules used by the generators:
+
+- Numeric size thresholds: the generators pick Java integer types based on the total integer digits (n):
+    - n <= 4 -> `Short`
+    - 5 <= n <= 9 -> `Integer`
+    - 10 <= n <= 18 -> `Long`
+    - n > 18 -> `BigInteger`
+- For signed pictures (`S9(...)`) the same type selection applies; sign is handled at conversion time.
+- For pictures containing an implied decimal point (`V`), the generators always use `BigDecimal` with scale equal to the
+  number of digits after `V`.
+- `DISPLAY` fields with numeric pictures (e.g., `9(5)`) are mapped to the numeric Java types above, but purely
+  alphanumeric `X(...)`/`A(...)` are `String`.
+- `COMP-3` (packed decimal) is mapped to `BigDecimal` to preserve precision and scale.
+- Floating point usages `COMP-1`/`COMP-2` map to `Float`/`Double` respectively.
 
 ### Complex Structures
 
@@ -171,19 +181,6 @@ EmployeeRecord deserialized = EmployeeRecord.deserialize(cobolData);
 | `REDEFINES`                        | Multiple fields (same position) | Alternative field interpretations |
 | `88 level` (Conditions)            | `boolean` methods               | Condition name checks             |
 | Group items                        | Nested classes                  | Hierarchical structures           |
-
-### Character Encodings
-
-- **EBCDIC** (`Cp037`): IBM mainframe encoding (default for embedded serialization)
-- **ASCII** (`US-ASCII`): Standard ASCII encoding
-- **UTF-8**: Unicode encoding
-
-Character encoding is used for:
-
-- DISPLAY data types with picture clauses `X(n)` and `A(n)`
-- Converting between Java strings and COBOL character data
-
-Binary data types (COMP, COMP-3, etc.) are not affected by character encoding.
 
 ## Maven Plugin
 
@@ -196,9 +193,9 @@ The Maven plugin generates Java POJOs from COBOL copybook files during the build
 <build>
     <plugins>
         <plugin>
-            <groupId>org.c4rth</groupId>
+            <groupId>org.pojobook</groupId>
             <artifactId>pojobook-maven-plugin</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <version>LAST_VERSION</version>
             <executions>
                 <execution>
                     <goals>
@@ -236,14 +233,6 @@ single execution:
 </execution>
 ```
 
-**Supported wildcard patterns:**
-
-- `*.cpy` - All files ending with .cpy in the specified directory
-- `*.cbl` - All files ending with .cbl in the specified directory
-- `**/*.cpy` - All .cpy files in the directory and all subdirectories (recursive)
-- `customer-*.cpy` - All files starting with "customer-" and ending with .cpy
-- `test?.cpy` - Files like test1.cpy, test2.cpy, etc. (? matches single character)
-
 ### Configuration Parameters
 
 #### Required Parameters
@@ -255,133 +244,21 @@ single execution:
 
 #### Optional Parameters
 
-| Parameter                   | Type    | Default                                                 | Description                                                      |
-|-----------------------------|---------|---------------------------------------------------------|------------------------------------------------------------------|
-| `outputDirectory`           | File    | `${project.build.directory}/generated-sources/pojobook` | Output directory for generated sources                           |
-| `generatorType`             | String  | `ANNOTATION`                                            | Generator type: `ANNOTATION` or `EMBEDDED`                       |
-| `generateGettersSetters`    | boolean | `true`                                                  | Generate getter and setter methods                               |
-| `generateToString`          | boolean | `true`                                                  | Generate toString() method                                       |
-| `generateEqualsAndHashCode` | boolean | `true`                                                  | Generate equals() and hashCode() methods                         |
-| `defaultEncoding`           | String  | -                                                       | Character encoding: `EBCDIC`, `ASCII`, or `UTF8` (embedded only) |
-
-### Multiple Copybooks Example
-
-Using wildcards to process multiple copybooks efficiently:
-
-```xml
-
-<plugin>
-    <groupId>org.c4rth</groupId>
-    <artifactId>pojobook-maven-plugin</artifactId>
-    <version>1.0-SNAPSHOT</version>
-    <executions>
-        <!-- Generate from all .cpy files with embedded serialization -->
-        <execution>
-            <id>generate-cpy-files</id>
-            <goals>
-                <goal>generate</goal>
-            </goals>
-            <configuration>
-                <copybookFile>src/main/resources/copybooks/*.cpy</copybookFile>
-                <packageName>com.example.model</packageName>
-                <generatorType>embedded</generatorType>
-                <encoding>EBCDIC</encoding>
-            </configuration>
-        </execution>
-
-        <!-- Generate from all .cbl files with annotation-based approach -->
-        <execution>
-            <id>generate-cbl-files</id>
-            <goals>
-                <goal>generate</goal>
-            </goals>
-            <configuration>
-                <copybookFile>src/main/resources/copybooks/*.cbl</copybookFile>
-                <packageName>com.example.model</packageName>
-                <generatorType>annotation</generatorType>
-            </configuration>
-        </execution>
-
-        <!-- Recursive: all copybooks in subdirectories -->
-        <execution>
-            <id>generate-all-recursive</id>
-            <goals>
-                <goal>generate</goal>
-            </goals>
-            <configuration>
-                <copybookFile>src/main/resources/copybooks/**/*.cpy</copybookFile>
-                <packageName>com.example.model</packageName>
-                <generatorType>embedded</generatorType>
-            </configuration>
-        </execution>
-    </executions>
-</plugin>
-```
-
-Or generate specific files individually:
-
-```xml
-
-<plugin>
-    <groupId>org.c4rth</groupId>
-    <artifactId>pojobook-maven-plugin</artifactId>
-    <version>1.0-SNAPSHOT</version>
-    <executions>
-        <!-- Employee Record with Annotations -->
-        <execution>
-            <id>generate-employee</id>
-            <goals>
-                <goal>generate</goal>
-            </goals>
-            <configuration>
-                <copybookFile>src/main/resources/copybooks/employee-record.cpy</copybookFile>
-                <packageName>com.example.model</packageName>
-                <generatorType>annotation</generatorType>
-            </configuration>
-        </execution>
-
-        <!-- Customer Record with Embedded Serialization -->
-        <execution>
-            <id>generate-customer</id>
-            <goals>
-                <goal>generate</goal>
-            </goals>
-            <configuration>
-                <copybookFile>src/main/resources/copybooks/customer-record.cpy</copybookFile>
-                <packageName>com.example.model</packageName>
-                <generatorType>embedded</generatorType>
-                <defaultEncoding>EBCDIC</defaultEncoding>
-            </configuration>
-        </execution>
-    </executions>
-</plugin>
-```
+| Parameter         | Type   | Default                                                 | Description                                |
+|-------------------|--------|---------------------------------------------------------|--------------------------------------------|
+| `outputDirectory` | File   | `${project.build.directory}/generated-sources/pojobook` | Output directory for generated sources     |
+| `generatorType`   | String | `EMBEDDED`                                              | Generator type: `ANNOTATION` or `EMBEDDED` |
 
 ## Dependencies
 
-### For Annotation-Based POJOs
-
-Add the serializer dependency to your project:
+Add the core dependency to your project:
 
 ```xml
 
 <dependency>
-    <groupId>org.c4rth</groupId>
-    <artifactId>pojobook-serializer</artifactId>
-    <version>1.0-SNAPSHOT</version>
-</dependency>
-```
-
-### For Embedded Serialization POJOs
-
-Minimal dependencies required (only for CharacterEncoding enum):
-
-```xml
-
-<dependency>
-    <groupId>org.c4rth</groupId>
-    <artifactId>pojobook-serializer</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <groupId>org.pojobook</groupId>
+    <artifactId>pojobook-core</artifactId>
+    <version>LAST_VERSION</version>
 </dependency>
 ```
 
@@ -409,9 +286,9 @@ Add to your `pom.xml`:
 <build>
     <plugins>
         <plugin>
-            <groupId>org.c4rth</groupId>
+            <groupId>org.pojobook</groupId>
             <artifactId>pojobook-maven-plugin</artifactId>
-            <version>1.0-SNAPSHOT</version>
+            <version>LAST_VERSION</version>
             <executions>
                 <execution>
                     <goals>
@@ -421,79 +298,12 @@ Add to your `pom.xml`:
                         <copybookFile>src/main/resources/copybooks/employee.cpy</copybookFile>
                         <packageName>com.example.model</packageName>
                         <generatorType>EMBEDDED</generatorType>
-                        <defaultEncoding>EBCDIC</defaultEncoding>
                     </configuration>
                 </execution>
             </executions>
         </plugin>
     </plugins>
 </build>
-```
-
-### 3. Generate and Use
-
-```bash
-mvn clean compile
-```
-
-The generated class will be in `target/generated-sources/pojobook/com/example/model/EmployeeRecord.java`
-
-### 4. Use in Your Code
-
-**With Embedded Serialization:**
-
-```java
-// Create and populate
-EmployeeRecord employee = new EmployeeRecord();
-employee.
-
-setEmployeeId(12345678);
-employee.
-
-setFirstName("JOHN");
-employee.
-
-setLastName("DOE");
-employee.
-
-setSalary(new BigDecimal("75000.50"));
-        employee.
-
-setHireDate(20241106);
-
-// Serialize to COBOL format
-byte[] cobolData = employee.serialize();
-
-// Write to file or send to mainframe...
-Files.
-
-write(Paths.get("employee.dat"),cobolData);
-
-// Deserialize from COBOL format
-byte[] data = Files.readAllBytes(Paths.get("employee.dat"));
-EmployeeRecord deserialized = EmployeeRecord.deserialize(data);
-```
-
-**With Annotation-Based Serialization:**
-
-```java
-// Create facade
-CobolSerializerFacade facade = new CobolSerializerFacade(CharacterEncoding.CP1047);
-
-// Create and populate
-EmployeeRecord employee = new EmployeeRecord();
-employee.
-
-setEmployeeId(12345678);
-employee.
-
-setFirstName("JOHN");
-
-// Serialize
-byte[] cobolData = facade.serialize(employee);
-
-// Deserialize
-EmployeeRecord deserialized = facade.deserialize(cobolData, EmployeeRecord.class);
 ```
 
 ## Examples
@@ -514,47 +324,6 @@ Each module includes test cases showing:
 - Round-trip serialization/deserialization
 - Reading binary COBOL data files
 
-## Features
-
-✅ **Comprehensive COBOL Support**
-
-- All picture clause formats
-- All usage clauses (COMP, COMP-3, PACKED-DECIMAL, etc.)
-- OCCURS with fixed and variable lengths
-- REDEFINES for alternative field interpretations
-- Nested group structures
-- Condition names (88 level)
-
-✅ **Flexible Code Generation**
-
-- Annotation-based (reflection) approach
-- Embedded serialization (no reflection) approach
-- Customizable package names and options
-- Optional getters/setters, toString, equals/hashCode
-
-✅ **Data Validation**
-
-- Field length validation in setters
-- Array size validation
-- Type-safe conversions
-
-✅ **Character Encoding Support**
-
-- EBCDIC (IBM mainframe)
-- ASCII
-- UTF-8
-
-✅ **Maven Integration**
-
-- Automatic code generation during build
-- Generated sources added to classpath
-- Support for multiple copybooks
-
-## Requirements
-
-- Java 21 or higher
-- Maven 3.6 or higher
-
 ## License
 
 This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
@@ -566,4 +335,3 @@ Contributions are welcome! Please feel free to submit pull requests or open issu
 ## Support
 
 For questions, issues, or feature requests, please open an issue on the GitHub repository.
-

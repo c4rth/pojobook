@@ -10,24 +10,12 @@
         <version>${revision}</version>
     </parent>
 
-    <artifactId>pojobook-generator</artifactId>
+    <artifactId>pojobook-core</artifactId>
     <packaging>jar</packaging>
 
-    <description>POJO generator from COBOL copybook definitions</description>
+    <description>Parser, Serializer, deserializer, and type definitions for COBOL copybook binary format</description>
 
     <dependencies>
-        <!-- Depend on the serializer module -->
-        <dependency>
-            <groupId>org.pojobook</groupId>
-            <artifactId>pojobook-core</artifactId>
-        </dependency>
-
-        <!-- JavaPoet for code generation -->
-        <dependency>
-            <groupId>com.palantir.javapoet</groupId>
-            <artifactId>javapoet</artifactId>
-        </dependency>
-
         <!-- SLF4J API -->
         <dependency>
             <groupId>org.slf4j</groupId>

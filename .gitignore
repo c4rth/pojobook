@@ -15,3 +15,5 @@
 log/
 target/
 /**/target/
+
+.flattened-pom.xml

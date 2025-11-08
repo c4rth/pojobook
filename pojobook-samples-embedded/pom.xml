@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.pojobook</groupId>
+        <artifactId>pojobook-parent</artifactId>
+        <version>${revision}</version>
+    </parent>
+    <artifactId>pojobook-samples-embedded</artifactId>
+    <packaging>jar</packaging>
+    <description>Sample applications demonstrating PojoBook usage with embedded serialization (no annotations, no
+        reflection)
+    </description>
+    <dependencies>
+        <dependency>
+            <groupId>org.pojobook</groupId>
+            <artifactId>pojobook-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <!-- PojoBook Maven Plugin - Generate POJOs with EMBEDDED serialization -->
+            <plugin>
+                <groupId>org.pojobook</groupId>
+                <artifactId>pojobook-maven-plugin</artifactId>
+                <executions>
+                    <!-- Generate POJOs from all .cpy copybook files -->
+                    <execution>
+                        <id>generate-from-cpy-files</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <copybookFile>src/main/resources/copybooks/*.cpy</copybookFile>
+                            <packageName>org.pojobook.samples.generated</packageName>
+                            <generatorType>embedded</generatorType>
+                        </configuration>
+                    </execution>
+
+                    <!-- Generate POJOs from all .cbl copybook files -->
+                    <execution>
+                        <id>generate-from-cbl-files</id>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                        <configuration>
+                            <copybookFile>src/main/resources/copybooks/*.cbl</copybookFile>
+                            <packageName>org.pojobook.samples.generated</packageName>
+                            <generatorType>embedded</generatorType>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+        </plugins>
+    </build>
+</project>
+

@@ -4,9 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.c4rth</groupId>
+    <groupId>org.pojobook</groupId>
     <artifactId>pojobook-parent</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <description>Parent POM for PojoBook - A modern Java library for converting between POJO and COBOL Copybook
@@ -21,29 +21,52 @@
         </license>
     </licenses>
 
-    <modules>
-        <module>pojobook-serializer</module>
-        <module>pojobook-generator</module>
-        <module>pojobook-maven-plugin</module>
-        <module>pojobook-annotation-samples</module>
-        <module>pojobook-embedded-samples</module>
-        <module>private-jrecord-samples</module>
-        <module>private-samples</module>
-    </modules>
-
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-        <maven.compiler.release>21</maven.compiler.release>
+        <java.version>21</java.version>
+
+        <!-- Version -->
+        <revision>0.1.0-SNAPSHOT</revision>
 
         <!-- Dependency versions -->
         <slf4j.version>2.0.17</slf4j.version>
-        <junit.version>5.14.1</junit.version>
+        <junit.version>6.0.1</junit.version>
+        <javapoet.version>0.8.0</javapoet.version>
     </properties>
+
+    <modules>
+        <module>pojobook-core</module>
+        <module>pojobook-generator</module>
+        <module>pojobook-maven-plugin</module>
+        <module>pojobook-samples-annotation</module>
+        <module>pojobook-samples-embedded</module>
+        <module>pojobook-benchmark</module>
+        <module>private-samples-jrecord</module>
+        <module>private-samples</module>
+    </modules>
+
 
     <dependencyManagement>
         <dependencies>
+            <!-- Internal module dependencies -->
+            <dependency>
+                <groupId>org.pojobook</groupId>
+                <artifactId>pojobook-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.pojobook</groupId>
+                <artifactId>pojobook-generator</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.pojobook</groupId>
+                <artifactId>pojobook-maven-plugin</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
             <!-- SLF4J API -->
             <dependency>
                 <groupId>org.slf4j</groupId>
@@ -51,12 +74,18 @@
                 <version>${slf4j.version}</version>
             </dependency>
 
+            <!-- JavaPoet for code generation -->
+            <dependency>
+                <groupId>com.palantir.javapoet</groupId>
+                <artifactId>javapoet</artifactId>
+                <version>${javapoet.version}</version>
+            </dependency>
+
             <!-- SLF4J Simple Implementation -->
             <dependency>
                 <groupId>org.slf4j</groupId>
                 <artifactId>slf4j-simple</artifactId>
                 <version>${slf4j.version}</version>
-                <scope>test</scope>
             </dependency>
 
             <!-- JUnit Jupiter -->
@@ -73,13 +102,19 @@
         <pluginManagement>
             <plugins>
                 <plugin>
+                    <groupId>org.pojobook</groupId>
+                    <artifactId>pojobook-maven-plugin</artifactId>
+                    <version>${project.version}</version>
+                </plugin>
+
+                <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>3.14.1</version>
                     <configuration>
-                        <source>21</source>
-                        <target>21</target>
-                        <release>21</release>
+                        <source>${java.version}</source>
+                        <target>${java.version}</target>
+                        <release>${java.version}</release>
                     </configuration>
                 </plugin>
 
@@ -94,8 +129,42 @@
                     <artifactId>maven-resources-plugin</artifactId>
                     <version>3.3.1</version>
                 </plugin>
+
+                <plugin>
+                    <groupId>org.codehaus.mojo</groupId>
+                    <artifactId>flatten-maven-plugin</artifactId>
+                    <version>1.6.0</version>
+                </plugin>
             </plugins>
         </pluginManagement>
+
+        <plugins>
+            <!-- Flatten plugin to resolve ${revision} property -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 </project>
 
