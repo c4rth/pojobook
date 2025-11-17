@@ -14,7 +14,6 @@ import javax.lang.model.element.Modifier;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -234,86 +233,129 @@ public abstract class AbstractPojoGenerator {
                 .addParameter(type, fieldName)
                 .returns(void.class);
 
-        addValidations(setter, field, fieldName, javaType);
-        addFieldAssignment(setter, field, fieldName, javaType);
+        addValidationAndAssignment(setter, field, fieldName, javaType);
 
         return setter.build();
     }
 
-    private void addValidations(MethodSpec.Builder setter, FieldDefinition field,
-                                String fieldName, String javaType) {
-        if (javaType.equals("java.lang.String") && field.getIntegerDigits() > 0) {
-            addStringValidation(setter, field, fieldName);
-        }
+    private void addValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
+                                           String fieldName, String javaType) {
+        ClassName utilClass = ClassName.get("org.pojobook.util", "FieldLengthUtil");
 
-        addNumericValidation(setter, field, fieldName, javaType);
-
-        if (javaType.contains("String") && javaType.endsWith("[]")) {
-            addStringArrayValidation(setter, field, fieldName);
-        }
-
-        addNumericArrayValidation(setter, field, fieldName, javaType);
-
-        if (javaType.endsWith("[]") && field.getOccurs() > 1) {
-            addArrayLengthValidation(setter, field, fieldName);
-        }
-    }
-
-    private void addStringValidation(MethodSpec.Builder setter, FieldDefinition field, String fieldName) {
-        setter.beginControlFlow("if ($L != null && $L.length() > $L)",
-                fieldName, fieldName, field.getIntegerDigits());
-        setter.addStatement("throw new $T($S)", IllegalArgumentException.class,
-                "Field " + field.getName() + " exceeds maximum length of " + field.getIntegerDigits());
-        setter.endControlFlow();
-    }
-
-    private void addStringArrayValidation(MethodSpec.Builder setter, FieldDefinition field, String fieldName) {
-        int maxLength = field.getIntegerDigits() > 0 ? field.getIntegerDigits() : 1;
-        setter.beginControlFlow("if ($L != null)", fieldName);
-        setter.beginControlFlow("for (int i = 0; i < $L.length; i++)", fieldName);
-        setter.beginControlFlow("if ($L[i] != null && $L[i].length() > $L)",
-                fieldName, fieldName, maxLength);
-        setter.addStatement("throw new $T($S + i + $S)", IllegalArgumentException.class,
-                "Field " + field.getName() + "[", "] exceeds maximum length of " + maxLength);
-        setter.endControlFlow();
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    private void addArrayLengthValidation(MethodSpec.Builder setter, FieldDefinition field, String fieldName) {
-        setter.beginControlFlow("if ($L != null && $L.length != $L)",
-                fieldName, fieldName, field.getOccurs());
-        setter.addStatement("throw new $T($S + $L.length)", IllegalArgumentException.class,
-                "Field " + field.getName() + " array length must be exactly " + field.getOccurs() + " but was ",
-                fieldName);
-        setter.endControlFlow();
-    }
-
-    private void addFieldAssignment(MethodSpec.Builder setter, FieldDefinition field,
-                                    String fieldName, String javaType) {
+        // Add assignment with validation inline
         if (javaType.equals("java.math.BigDecimal") || javaType.equals("BigDecimal")) {
-            addBigDecimalAssignment(setter, fieldName);
+            addBigDecimalValidationAndAssignment(setter, field, fieldName, utilClass);
         } else if (javaType.equals("java.math.BigDecimal[]") || javaType.equals("BigDecimal[]")) {
-            addBigDecimalArrayAssignment(setter, fieldName);
+            addBigDecimalArrayValidationAndAssignment(setter, field, fieldName, utilClass);
         } else {
-            setter.addStatement("this.$L = $L", fieldName, fieldName);
+            // For all other types, generate a single statement with inline validation
+            addSimpleValidationAndAssignment(setter, field, fieldName, javaType, utilClass);
         }
     }
 
-    private void addBigDecimalAssignment(MethodSpec.Builder setter, String fieldName) {
-        setter.beginControlFlow("if ($L != null)", fieldName);
-        setter.addStatement("this.$L = $L.stripTrailingZeros()", fieldName, fieldName);
-        setter.nextControlFlow("else");
+    private void addSimpleValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
+                                                  String fieldName, String javaType, ClassName utilClass) {
+        // String validation
+        if (javaType.equals("java.lang.String") && field.getIntegerDigits() > 0) {
+            setter.addStatement("this.$L = $T.checkStringLength($L, $L, $S)",
+                    fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+            return;
+        }
+
+        // String array validation
+        if (javaType.contains("String") && javaType.endsWith("[]")) {
+            int maxLength = field.getIntegerDigits() > 0 ? field.getIntegerDigits() : 1;
+            setter.addStatement("this.$L = $T.checkStringArrayLength($L, $L, $S)",
+                    fieldName, utilClass, fieldName, maxLength, field.getName());
+            return;
+        }
+
+        // Numeric validation (non-BigDecimal)
+        if (field.getIntegerDigits() > 0 && isNumericType(javaType) && !javaType.contains("BigDecimal")) {
+            if (javaType.contains("BigInteger")) {
+                setter.addStatement("this.$L = $T.checkBigIntegerRange($L, $L, $S)",
+                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+            } else if (javaType.contains("Integer")) {
+                setter.addStatement("this.$L = $T.checkIntegerRange($L, $L, $S)",
+                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+            } else if (javaType.contains("Long")) {
+                setter.addStatement("this.$L = $T.checkLongRange($L, $L, $S)",
+                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+            } else if (javaType.contains("Short")) {
+                setter.addStatement("this.$L = $T.checkShortRange($L, $L, $S)",
+                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+            }
+            return;
+        }
+
+        // Numeric array validation (non-BigDecimal)
+        if (field.getIntegerDigits() > 0 && javaType.endsWith("[]")) {
+            String baseType = javaType.substring(0, javaType.length() - 2);
+            if (isNumericType(baseType) && !baseType.contains("BigDecimal")) {
+                if (baseType.contains("BigInteger")) {
+                    setter.addStatement("this.$L = $T.checkBigIntegerArrayRange($L, $L, $S)",
+                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+                } else if (baseType.contains("Integer")) {
+                    setter.addStatement("this.$L = $T.checkIntegerArrayRange($L, $L, $S)",
+                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+                } else if (baseType.contains("Long")) {
+                    setter.addStatement("this.$L = $T.checkLongArrayRange($L, $L, $S)",
+                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+                } else if (baseType.contains("Short")) {
+                    setter.addStatement("this.$L = $T.checkShortArrayRange($L, $L, $S)",
+                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+                }
+                return;
+            }
+        }
+
+        // Array length validation
+        if (javaType.endsWith("[]") && field.getOccurs() > 1) {
+            setter.addStatement("this.$L = $T.checkArrayLength($L, $L, $S)",
+                    fieldName, utilClass, fieldName, field.getOccurs(), field.getName());
+            return;
+        }
+
+        // No validation needed
         setter.addStatement("this.$L = $L", fieldName, fieldName);
-        setter.endControlFlow();
     }
 
-    private void addBigDecimalArrayAssignment(MethodSpec.Builder setter, String fieldName) {
-        setter.beginControlFlow("if ($L != null)", fieldName);
-        setter.addStatement("this.$L = new $T[$L.length]", fieldName, BigDecimal.class, fieldName);
-        setter.beginControlFlow("for (int i = 0; i < $L.length; i++)", fieldName);
-        setter.beginControlFlow("if ($L[i] != null)", fieldName);
-        setter.addStatement("this.$L[i] = $L[i].stripTrailingZeros()", fieldName, fieldName);
+    private void addBigDecimalValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
+                                                      String fieldName, ClassName utilClass) {
+        if (field.getIntegerDigits() > 0) {
+            // Store validated value once
+            setter.addStatement("$T validated = $T.checkBigDecimalRange($L, $L, $S)",
+                    BigDecimal.class, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+            setter.beginControlFlow("if (validated != null)");
+            setter.addStatement("this.$L = validated.stripTrailingZeros()", fieldName);
+            setter.nextControlFlow("else");
+            setter.addStatement("this.$L = validated", fieldName);
+            setter.endControlFlow();
+        } else {
+            // No validation, just stripTrailingZeros
+            setter.beginControlFlow("if ($L != null)", fieldName);
+            setter.addStatement("this.$L = $L.stripTrailingZeros()", fieldName, fieldName);
+            setter.nextControlFlow("else");
+            setter.addStatement("this.$L = $L", fieldName, fieldName);
+            setter.endControlFlow();
+        }
+    }
+
+    private void addBigDecimalArrayValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
+                                                           String fieldName, ClassName utilClass) {
+        if (field.getIntegerDigits() > 0) {
+            // Store validated array once
+            setter.addStatement("$T[] validated = $T.checkBigDecimalArrayRange($L, $L, $S)",
+                    BigDecimal.class, utilClass, fieldName, field.getIntegerDigits(), field.getName());
+        } else {
+            setter.addStatement("$T[] validated = $L", BigDecimal.class, fieldName);
+        }
+
+        setter.beginControlFlow("if (validated != null)");
+        setter.addStatement("this.$L = new $T[validated.length]", fieldName, BigDecimal.class);
+        setter.beginControlFlow("for (int i = 0; i < validated.length; i++)");
+        setter.beginControlFlow("if (validated[i] != null)");
+        setter.addStatement("this.$L[i] = validated[i].stripTrailingZeros()", fieldName);
         setter.nextControlFlow("else");
         setter.addStatement("this.$L[i] = null", fieldName);
         setter.endControlFlow();
@@ -321,6 +363,11 @@ public abstract class AbstractPojoGenerator {
         setter.nextControlFlow("else");
         setter.addStatement("this.$L = null", fieldName);
         setter.endControlFlow();
+    }
+
+
+    private boolean isNumericType(String javaType) {
+        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*");
     }
 
     /**
@@ -343,157 +390,6 @@ public abstract class AbstractPojoGenerator {
             case "java.math.BigInteger", "BigInteger" -> ClassName.get(BigInteger.class);
             default -> ClassName.bestGuess(typeName);
         };
-    }
-
-    /**
-     * Add numeric validation for a single numeric field.
-     */
-    private void addNumericValidation(MethodSpec.Builder setter, FieldDefinition field,
-                                      String fieldName, String javaType) {
-        if (field.getIntegerDigits() == 0 || !isNumericType(javaType)) {
-            return;
-        }
-
-        ValidationContext ctx = new ValidationContext(field, fieldName, javaType);
-
-        if (javaType.contains("BigDecimal")) {
-            addBigDecimalValidation(setter, ctx);
-        } else if (javaType.contains("BigInteger")) {
-            addBigIntegerValidation(setter, ctx);
-        } else {
-            addPrimitiveValidation(setter, ctx);
-        }
-    }
-
-    private boolean isNumericType(String javaType) {
-        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*");
-    }
-
-    private void addBigDecimalValidation(MethodSpec.Builder setter, ValidationContext ctx) {
-        setter.beginControlFlow("if ($L != null)", ctx.fieldName);
-        setter.addStatement("$T integerPart = $L.abs().setScale(0, $T.DOWN)",
-                BigDecimal.class, ctx.fieldName, RoundingMode.class);
-        setter.addStatement("$T maxAllowed = new $T($S)",
-                BigDecimal.class, BigDecimal.class, String.valueOf(ctx.maxValue));
-        setter.beginControlFlow("if (integerPart.compareTo(maxAllowed) > 0)");
-        setter.addStatement("throw new $T($S)", IllegalArgumentException.class,
-                "Field " + ctx.field.getName() + " exceeds maximum integer digits of " + ctx.field.getIntegerDigits());
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    private void addBigIntegerValidation(MethodSpec.Builder setter, ValidationContext ctx) {
-        setter.beginControlFlow("if ($L != null)", ctx.fieldName);
-        setter.addStatement("$T maxAllowed = new $T($S)",
-                BigInteger.class, BigInteger.class, String.valueOf(ctx.maxValue));
-        setter.addStatement("$T minAllowed = new $T($S)",
-                BigInteger.class, BigInteger.class, String.valueOf(ctx.minValue));
-        setter.beginControlFlow("if ($L.compareTo(maxAllowed) > 0 || $L.compareTo(minAllowed) < 0)",
-                ctx.fieldName, ctx.fieldName);
-        setter.addStatement("throw new $T($S)", IllegalArgumentException.class,
-                "Field " + ctx.field.getName() + " value out of range for " + ctx.field.getIntegerDigits() + " digits");
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    private void addPrimitiveValidation(MethodSpec.Builder setter, ValidationContext ctx) {
-        setter.beginControlFlow("if ($L != null)", ctx.fieldName);
-        if (ctx.javaType.contains("Long")) {
-            setter.beginControlFlow("if ($L > $LL || $L < $LL)",
-                    ctx.fieldName, ctx.maxValue, ctx.fieldName, ctx.minValue);
-        } else {
-            setter.beginControlFlow("if ($L > $L || $L < $L)",
-                    ctx.fieldName, (int) ctx.maxValue, ctx.fieldName, (int) ctx.minValue);
-        }
-        setter.addStatement("throw new $T($S)", IllegalArgumentException.class,
-                "Field " + ctx.field.getName() + " value out of range for " + ctx.field.getIntegerDigits() + " digits");
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    /**
-     * Add numeric validation for numeric arrays.
-     */
-    private void addNumericArrayValidation(MethodSpec.Builder setter, FieldDefinition field,
-                                           String fieldName, String javaType) {
-        if (field.getIntegerDigits() == 0 || !javaType.endsWith("[]")) {
-            return;
-        }
-
-        String baseType = javaType.substring(0, javaType.length() - 2);
-        if (!isNumericType(baseType)) {
-            return;
-        }
-
-        ValidationContext ctx = new ValidationContext(field, fieldName, baseType);
-
-        setter.beginControlFlow("if ($L != null)", fieldName);
-        setter.beginControlFlow("for (int i = 0; i < $L.length; i++)", fieldName);
-
-        if (baseType.contains("BigDecimal")) {
-            addBigDecimalArrayElementValidation(setter, ctx);
-        } else if (baseType.contains("BigInteger")) {
-            addBigIntegerArrayElementValidation(setter, ctx);
-        } else {
-            addPrimitiveArrayElementValidation(setter, ctx);
-        }
-
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    private void addBigDecimalArrayElementValidation(MethodSpec.Builder setter, ValidationContext ctx) {
-        setter.beginControlFlow("if ($L[i] != null)", ctx.fieldName);
-        setter.addStatement("$T integerPart = $L[i].abs().setScale(0, $T.DOWN)",
-                BigDecimal.class, ctx.fieldName, RoundingMode.class);
-        setter.addStatement("$T maxAllowed = new $T($S)",
-                BigDecimal.class, BigDecimal.class, String.valueOf(ctx.maxValue));
-        setter.beginControlFlow("if (integerPart.compareTo(maxAllowed) > 0)");
-        setter.addStatement("throw new $T($S + i + $S)", IllegalArgumentException.class,
-                "Field " + ctx.field.getName() + "[", "] exceeds maximum integer digits of " + ctx.field.getIntegerDigits());
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    private void addBigIntegerArrayElementValidation(MethodSpec.Builder setter, ValidationContext ctx) {
-        setter.beginControlFlow("if ($L[i] != null)", ctx.fieldName);
-        setter.addStatement("$T maxAllowed = new $T($S)",
-                BigInteger.class, BigInteger.class, String.valueOf(ctx.maxValue));
-        setter.addStatement("$T minAllowed = new $T($S)",
-                BigInteger.class, BigInteger.class, String.valueOf(ctx.minValue));
-        setter.beginControlFlow("if ($L[i].compareTo(maxAllowed) > 0 || $L[i].compareTo(minAllowed) < 0)",
-                ctx.fieldName, ctx.fieldName);
-        setter.addStatement("throw new $T($S + i + $S)", IllegalArgumentException.class,
-                "Field " + ctx.field.getName() + "[", "] value out of range for " + ctx.field.getIntegerDigits() + " digits");
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    private void addPrimitiveArrayElementValidation(MethodSpec.Builder setter, ValidationContext ctx) {
-        setter.beginControlFlow("if ($L[i] != null)", ctx.fieldName);
-        if (ctx.javaType.contains("Long")) {
-            setter.beginControlFlow("if ($L[i] > $LL || $L[i] < $LL)",
-                    ctx.fieldName, ctx.maxValue, ctx.fieldName, ctx.minValue);
-        } else {
-            setter.beginControlFlow("if ($L[i] > $L || $L[i] < $L)",
-                    ctx.fieldName, (int) ctx.maxValue, ctx.fieldName, (int) ctx.minValue);
-        }
-        setter.addStatement("throw new $T($S + i + $S)", IllegalArgumentException.class,
-                "Field " + ctx.field.getName() + "[", "] value out of range for " + ctx.field.getIntegerDigits() + " digits");
-        setter.endControlFlow();
-        setter.endControlFlow();
-    }
-
-    /**
-     * Calculate the maximum integer value based on number of digits.
-     */
-    private long calculateMaxIntegerValue(int digits) {
-        if (digits == 0) return 0;
-        long max = 1;
-        for (int i = 0; i < digits; i++) {
-            max *= 10;
-        }
-        return max - 1;
     }
 
     /**
@@ -708,24 +604,6 @@ public abstract class AbstractPojoGenerator {
         return field.isGroup() && field.getOccurs() == 1 && !node.getChildren().isEmpty();
     }
 
-    /**
-     * Context for validation operations.
-     */
-    private class ValidationContext {
-        final FieldDefinition field;
-        final String fieldName;
-        final String javaType;
-        final long maxValue;
-        final long minValue;
-
-        ValidationContext(FieldDefinition field, String fieldName, String javaType) {
-            this.field = field;
-            this.fieldName = fieldName;
-            this.javaType = javaType;
-            this.maxValue = calculateMaxIntegerValue(field.getIntegerDigits());
-            this.minValue = field.isSigned() ? -maxValue : 0;
-        }
-    }
 
     /**
      * Context holder for builder operations.

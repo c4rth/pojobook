@@ -4,6 +4,11 @@ import org.pojobook.CobolDataType;
 import org.pojobook.annotation.CobolField;
 
 public class CobolFieldUtil {
+
+    private CobolFieldUtil() {
+        // Prevent instantiation
+    }
+
     /**
      * Calculate the byte length of a field.
      */

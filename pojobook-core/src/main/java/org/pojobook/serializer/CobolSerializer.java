@@ -128,19 +128,6 @@ public class CobolSerializer {
                 : serializeSimpleFieldWithLength(value, fieldMeta.annotation, fieldMeta.baseLength(), charset);
     }
 
-    /**
-     * Serialize a single field.
-     */
-    private byte[] serializeField(Object value, CobolField cobolField, Charset charset) throws SerializationException {
-        if (value == null) {
-            return createNullFieldBytes(cobolField);
-        }
-
-        return value.getClass().isArray()
-                ? serializeArray(value, cobolField, charset)
-                : serializeSimpleField(value, cobolField, charset);
-    }
-
     private byte[] createNullFieldBytes(CobolField cobolField) {
         int fieldLength = calculateFieldLength(cobolField);
         return new byte[fieldLength];
@@ -369,20 +356,10 @@ public class CobolSerializer {
      */
     private byte[] serializeDisplay(Object value, CobolField field, Charset charset) {
         boolean isNumeric = isNumericPicture(field.picture());
+        int length = field.length() > 0 ? field.length() : field.integerDigits() + field.decimalDigits();
 
-        if (field.signed() && field.signSeparate() && value instanceof Number) {
-            return serializeDisplayWithSeparateSign((Number) value, field, charset);
-        }
-
-        if (field.signed() && !field.signSeparate() && value instanceof Number && isNumeric) {
-            return serializeDisplayWithEmbeddedSign((Number) value, field, charset);
-        }
-
-        if (!field.signed() && field.decimalDigits() > 0 && value instanceof Number && isNumeric) {
-            return serializeDisplayWithImpliedDecimal((Number) value, field, charset);
-        }
-
-        return serializeDisplayString(value, field, isNumeric, charset);
+        return CobolFieldSerializer.serializeDisplay(value, length, field.decimalDigits(), isNumeric,
+                field.signed(), field.signSeparate(), "LEADING".equalsIgnoreCase(field.signPosition()), charset);
     }
 
     /**
@@ -391,233 +368,55 @@ public class CobolSerializer {
     private byte[] serializeDisplayWithLength(Object value, CobolField field, int baseLength, Charset charset) {
         boolean isNumeric = isNumericPicture(field.picture());
 
-        if (field.signed() && field.signSeparate() && value instanceof Number) {
-            return serializeDisplayWithSeparateSign((Number) value, field, charset);
+        // If sign is separate, baseLength includes the sign byte, but we need just the digits
+        int digitLength = baseLength;
+        if (field.signed() && field.signSeparate()) {
+            digitLength = baseLength - 1;
         }
 
-        if (field.signed() && !field.signSeparate() && value instanceof Number && isNumeric) {
-            return serializeDisplayWithEmbeddedSign((Number) value, field, charset);
-        }
-
-        if (!field.signed() && field.decimalDigits() > 0 && value instanceof Number && isNumeric) {
-            return serializeDisplayWithImpliedDecimal((Number) value, field, charset);
-        }
-
-        return serializeDisplayStringWithLength(value, baseLength, isNumeric, charset);
-    }
-
-    /**
-     * Serialize DISPLAY string with pre-calculated length (optimized).
-     */
-    private byte[] serializeDisplayStringWithLength(Object value, int length, boolean isNumeric, Charset charset) {
-        String strValue = value.toString();
-        int strLen = strValue.length();
-
-        // Fast path: if exact length, avoid allocations
-        if (strLen == length) {
-            return strValue.getBytes(charset);
-        }
-
-        // Optimize: use String.repeat() and pre-computed length
-        if (strLen < length) {
-            int padding = length - strLen;
-            if (isNumeric) {
-                // Numeric: pad left with zeros
-                strValue = "0".repeat(padding) + strValue;
-            } else {
-                // Alphanumeric: pad right with spaces
-                strValue = strValue + " ".repeat(padding);
-            }
-        } else {
-            strValue = strValue.substring(0, length);
-        }
-
-        return strValue.getBytes(charset);
+        return CobolFieldSerializer.serializeDisplay(value, digitLength, field.decimalDigits(), isNumeric,
+                field.signed(), field.signSeparate(), "LEADING".equalsIgnoreCase(field.signPosition()), charset);
     }
 
     private boolean isNumericPicture(String picture) {
         return picture.startsWith("9") || picture.startsWith("S9");
     }
 
-    private byte[] serializeDisplayString(Object value, CobolField field, boolean isNumeric, Charset charset) {
-        String strValue = value.toString();
-        int length = field.length() > 0 ? field.length() : field.integerDigits() + field.decimalDigits();
-        int strLen = strValue.length();
-
-        // Fast path: if exact length, avoid allocations
-        if (strLen == length) {
-            return strValue.getBytes(charset);
-        }
-
-        // Optimize: use String.repeat() instead of String.format()
-        if (strLen < length) {
-            int padding = length - strLen;
-            if (isNumeric) {
-                // Numeric: pad left with zeros
-                strValue = "0".repeat(padding) + strValue;
-            } else {
-                // Alphanumeric: pad right with spaces
-                strValue = strValue + " ".repeat(padding);
-            }
-        } else {
-            strValue = strValue.substring(0, length);
-        }
-
-        return strValue.getBytes(charset);
-    }
-
-    /**
-     * Serialize DISPLAY field with implied decimal (V in PIC clause).
-     */
-    private byte[] serializeDisplayWithImpliedDecimal(Number value, CobolField field, Charset charset) {
-        int length = field.integerDigits() + field.decimalDigits();
-        return DisplayNumericUtil.formatUnsignedWithImpliedDecimal(value, length, field.decimalDigits(), charset);
-    }
-
-    /**
-     * Serialize DISPLAY field with embedded sign (overpunch notation).
-     */
-    private byte[] serializeDisplayWithEmbeddedSign(Number value, CobolField field, Charset charset) {
-        int length = field.integerDigits() + field.decimalDigits();
-        return SignedNumericUtil.formatSignedDisplay(value, length, field.decimalDigits(), charset);
-    }
-
-    /**
-     * Serialize DISPLAY field with SIGN LEADING/TRAILING SEPARATE.
-     */
-    private byte[] serializeDisplayWithSeparateSign(Number value, CobolField field, Charset charset) {
-        BigDecimal decimal = toBigDecimal(value);
-        if (field.decimalDigits() > 0) {
-            decimal = decimal.setScale(field.decimalDigits(), RoundingMode.HALF_UP);
-        }
-
-        String unscaledValue = formatUnscaledValue(decimal.abs(), field);
-        byte signByte = getSignByte(decimal, charset);
-        byte[] digitBytes = unscaledValue.getBytes(charset);
-
-        return buildSignedResult(digitBytes, signByte, field);
-    }
-
-    private BigDecimal toBigDecimal(Number value) {
-        return value instanceof BigDecimal bd ? bd : new BigDecimal(value.toString());
-    }
-
-    private String formatUnscaledValue(BigDecimal absValue, CobolField field) {
-        int totalDigits = field.integerDigits() + field.decimalDigits();
-        return String.format("%0" + totalDigits + "d", absValue.unscaledValue());
-    }
-
-    private byte getSignByte(BigDecimal decimal, Charset charset) {
-        char signChar = decimal.signum() >= 0 ? '+' : '-';
-        return String.valueOf(signChar).getBytes(charset)[0];
-    }
-
-    private byte[] buildSignedResult(byte[] digitBytes, byte signByte, CobolField field) {
-        byte[] result = new byte[digitBytes.length + 1];
-
-        if ("LEADING".equalsIgnoreCase(field.signPosition())) {
-            result[0] = signByte;
-            System.arraycopy(digitBytes, 0, result, 1, digitBytes.length);
-        } else {
-            System.arraycopy(digitBytes, 0, result, 0, digitBytes.length);
-            result[digitBytes.length] = signByte;
-        }
-
-        return result;
-    }
-
     /**
      * Serialize COMP/BINARY field.
      */
     private byte[] serializeComp(Object value, CobolField field) {
-        long longValue = ((Number) value).longValue();
         int totalDigits = field.integerDigits() + field.decimalDigits();
-
-        // Inline ByteBuffer operations for performance
-        if (totalDigits <= 4) {
-            return ByteBuffer.allocate(2).putShort((short) longValue).array();
-        }
-        if (totalDigits <= 9) {
-            return ByteBuffer.allocate(4).putInt((int) longValue).array();
-        }
-        return ByteBuffer.allocate(8).putLong(longValue).array();
+        return CobolFieldSerializer.serializeComp(value, totalDigits);
     }
 
     /**
      * Serialize COMP-1 (float) field.
      */
     private byte[] serializeComp1(Object value) {
-        return ByteBuffer.allocate(4).putFloat(((Number) value).floatValue()).array();
+        return CobolFieldSerializer.serializeComp1(value);
     }
 
     /**
      * Serialize COMP-2 (double) field.
      */
     private byte[] serializeComp2(Object value) {
-        return ByteBuffer.allocate(8).putDouble(((Number) value).doubleValue()).array();
+        return CobolFieldSerializer.serializeComp2(value);
     }
 
     /**
      * Serialize COMP-3 (packed decimal) field.
      */
     private byte[] serializeComp3(Object value, CobolField field) {
-        BigDecimal decimal = toBigDecimal(((Number) value).doubleValue()).setScale(field.decimalDigits(), RoundingMode.HALF_UP);
-        String digits = formatUnscaledDigits(decimal.abs(), field);
-
-        return packDigits(digits, decimal.signum(), field.integerDigits() + field.decimalDigits());
-    }
-
-    private String formatUnscaledDigits(BigDecimal absValue, CobolField field) {
         int totalDigits = field.integerDigits() + field.decimalDigits();
-        StringBuilder digits = new StringBuilder(absValue.unscaledValue().toString());
-
-        while (digits.length() < totalDigits) {
-            digits.insert(0, "0");
-        }
-
-        return digits.toString();
-    }
-
-    private byte[] packDigits(String digits, int signum, int totalDigits) {
-        int byteLength = (totalDigits / 2) + 1;
-        byte[] packed = new byte[byteLength];
-
-        int digitIndex = 0;
-        for (int i = 0; i < byteLength - 1; i++) {
-            int high = Character.digit(digits.charAt(digitIndex++), 10);
-            int low = Character.digit(digits.charAt(digitIndex++), 10);
-            packed[i] = (byte) ((high << 4) | low);
-        }
-
-        int lastDigit = (totalDigits % 2 != 0) ? Character.digit(digits.charAt(digitIndex), 10) : 0;
-        int sign = signum >= 0 ? 0x0C : 0x0D;
-        packed[byteLength - 1] = (byte) ((lastDigit << 4) | sign);
-
-        return packed;
+        return CobolFieldSerializer.serializeComp3(value, totalDigits, field.decimalDigits());
     }
 
     /**
      * Serialize ZONED-DECIMAL field.
      */
     private byte[] serializeZonedDecimal(Object value, CobolField field) {
-        BigDecimal decimal = toBigDecimal(new BigDecimal(value.toString())).setScale(field.decimalDigits(), RoundingMode.HALF_UP);
-        String digits = formatUnscaledDigits(decimal.abs(), field);
         int totalDigits = field.integerDigits() + field.decimalDigits();
-
-        return createZonedBytes(digits, decimal.signum(), totalDigits);
-    }
-
-    private byte[] createZonedBytes(String digits, int signum, int totalDigits) {
-        byte[] zoned = new byte[totalDigits];
-
-        for (int i = 0; i < totalDigits - 1; i++) {
-            zoned[i] = (byte) (0xF0 | Character.digit(digits.charAt(i), 10));
-        }
-
-        int lastDigit = Character.digit(digits.charAt(totalDigits - 1), 10);
-        int sign = signum >= 0 ? 0xF0 : 0xD0;
-        zoned[totalDigits - 1] = (byte) (sign | lastDigit);
-
-        return zoned;
+        return CobolFieldSerializer.serializeZonedDecimal(value, totalDigits, field.decimalDigits(), field.signed());
     }
 }

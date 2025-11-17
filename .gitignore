@@ -17,3 +17,7 @@ target/
 /**/target/
 
 .flattened-pom.xml
+
+# Gradle
+.gradle/
+build/

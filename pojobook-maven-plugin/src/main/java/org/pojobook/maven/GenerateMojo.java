@@ -169,23 +169,25 @@ public class GenerateMojo extends AbstractMojo {
     private List<File> resolveCopybookFiles() throws IOException {
         List<File> files = new ArrayList<>();
 
-        // Convert to absolute path if relative
-        Path patternPath;
-        if (Paths.get(copybookFile).isAbsolute()) {
-            patternPath = Paths.get(copybookFile);
-        } else {
-            patternPath = project.getBasedir().toPath().resolve(copybookFile);
-        }
-
-        String pattern = patternPath.toString();
-
-        // Check if pattern contains wildcards
-        if (pattern.contains("*") || pattern.contains("?")) {
-            // Pattern contains wildcards - resolve them
+        // Check if copybookFile contains wildcards
+        if (copybookFile.contains("*") || copybookFile.contains("?")) {
+            // Pattern contains wildcards - build absolute pattern string manually
+            String pattern;
+            if (new File(copybookFile).isAbsolute()) {
+                pattern = copybookFile;
+            } else {
+                pattern = project.getBasedir().getAbsolutePath() + File.separator + copybookFile.replace("/", File.separator);
+            }
             files.addAll(resolveWildcardPattern(pattern));
         } else {
             // No wildcards - treat as single file
-            File singleFile = new File(pattern);
+            Path patternPath;
+            if (new File(copybookFile).isAbsolute()) {
+                patternPath = Paths.get(copybookFile);
+            } else {
+                patternPath = project.getBasedir().toPath().resolve(copybookFile);
+            }
+            File singleFile = patternPath.toFile();
             if (singleFile.exists() && singleFile.isFile()) {
                 files.add(singleFile);
             }

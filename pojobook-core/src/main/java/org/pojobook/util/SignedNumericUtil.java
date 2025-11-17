@@ -32,6 +32,10 @@ public final class SignedNumericUtil {
         }
 
         String str = new String(data, charset).trim();
+        return parseSignedDisplay(decimalDigits, str);
+    }
+
+    private static String parseSignedDisplay(int decimalDigits, String str) {
         if (str.isEmpty()) {
             return "0";
         }
@@ -63,19 +67,7 @@ public final class SignedNumericUtil {
         }
 
         String str = new String(data, offset, length, charset).trim();
-        if (str.isEmpty()) {
-            return "0";
-        }
-
-        char lastChar = str.charAt(str.length() - 1);
-        String prefix = str.substring(0, str.length() - 1).trim();
-
-        OverpunchResult decoded = decodeOverpunch(lastChar);
-        String numericStr = buildNumericString(prefix, decoded);
-
-        return decimalDigits > 0
-                ? insertDecimalPoint(numericStr, decimalDigits)
-                : numericStr;
+        return parseSignedDisplay(decimalDigits, str);
     }
 
     /**
@@ -188,19 +180,43 @@ public final class SignedNumericUtil {
     }
 
     private static String insertDecimalPoint(String numStr, int decimalDigits) {
-        boolean hasSign = numStr.startsWith("-");
-        String absValue = hasSign ? numStr.substring(1) : numStr;
+        final boolean negative = numStr.charAt(0) == '-';
+        final int start = negative ? 1 : 0;
+        final int len = numStr.length() - start;
 
-        // Pad with leading zeros if needed
-        while (absValue.length() <= decimalDigits) {
-            absValue = "0" + absValue;
+        // Ensure enough digits by computing padding count directly
+        final int padCount = Math.max(0, decimalDigits - len + 1);
+        final int totalDigits = len + padCount;
+
+        // Final string length: sign + intPart + '.' + decPart
+        final int resultLength = (negative ? 1 : 0) + totalDigits + 1;
+        final char[] out = new char[resultLength];
+
+        int idx = 0;
+        if (negative) {
+            out[idx++] = '-';
         }
 
-        int decimalPos = absValue.length() - decimalDigits;
-        String intPart = absValue.substring(0, decimalPos);
-        String decPart = absValue.substring(decimalPos);
+        // Write padded zeros + original digits
+        int i = 0;
 
-        return (hasSign ? "-" : "") + intPart + "." + decPart;
+        // zeros before integer part
+        for (; i < padCount; i++) {
+            out[idx++] = '0';
+        }
+
+        // copy digits from input
+        for (int j = start; j < numStr.length(); j++) {
+            out[idx++] = numStr.charAt(j);
+        }
+
+        // Now insert the decimal point by shifting right
+        // Move last decimalDigits chars right to make space for '.'
+        System.arraycopy(out, idx - decimalDigits, out, idx - decimalDigits + 1, decimalDigits);
+
+        out[idx - decimalDigits] = '.';  // insert decimal point
+
+        return new String(out);
     }
 
     private static BigDecimal toBigDecimal(Object value) {
