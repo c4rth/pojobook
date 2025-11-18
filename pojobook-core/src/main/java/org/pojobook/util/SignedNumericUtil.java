@@ -120,14 +120,6 @@ public final class SignedNumericUtil {
     }
 
     /**
-     * Format a numeric value to COBOL DISPLAY format with overpunched sign.
-     */
-    public static byte[] formatSignedDisplay(Number value, int length, int decimalDigits, Charset charset) {
-        String formatted = formatSignedNumeric(value, length, decimalDigits);
-        return formatted.getBytes(charset);
-    }
-
-    /**
      * Format a numeric value to string with overpunched sign (for generated code).
      */
     public static String formatSignedNumeric(Object value, int length, int decimalDigits) {
@@ -243,5 +235,6 @@ public final class SignedNumericUtil {
         T parse(String value);
     }
 
-    private record OverpunchResult(char digit, boolean isNegative) {}
+    private record OverpunchResult(char digit, boolean isNegative) {
+    }
 }

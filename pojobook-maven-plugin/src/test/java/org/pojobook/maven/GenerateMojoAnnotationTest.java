@@ -112,9 +112,9 @@ class GenerateMojoAnnotationTest {
         assertTrue(content.contains("package com.example.test;"), "Should contain package declaration");
         assertTrue(content.contains("public class Employeerecord") || content.contains("public class EmployeeRecord"),
                 "Should contain class declaration");
-        assertTrue(content.contains("private Integer empId;") || content.contains("private String empId;"),
+        assertTrue(content.contains("private Integer empId") || content.contains("private String empId"),
                 "Should contain empId field");
-        assertTrue(content.contains("private String empName;"), "Should contain empName field");
+        assertTrue(content.contains("private String empName"), "Should contain empName field");
         assertTrue(content.contains("getEmpId()"), "Should contain getEmpId method");
         assertTrue(content.contains("setEmpId("), "Should contain setEmpId method");
     }

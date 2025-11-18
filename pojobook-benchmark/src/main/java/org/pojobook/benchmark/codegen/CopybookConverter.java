@@ -1,8 +1,6 @@
 package org.pojobook.benchmark.codegen;
 
 
-import org.pojobook.benchmark.codegen.cobol.ConvertSampleCbk;
-import org.pojobook.benchmark.codegen.cobol.LineSampleCbkPojo;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +12,8 @@ import net.sf.JRecord.cgen.def.IWriter;
 import net.sf.JRecord.cgen.impl.io.IoBuilder;
 import net.sf.JRecord.def.IO.builders.ICobolIOBuilder;
 import net.sf.cb2xml.def.Cb2xmlConstants;
+import org.pojobook.benchmark.codegen.cobol.ConvertSampleCbk;
+import org.pojobook.benchmark.codegen.cobol.LineSampleCbkPojo;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

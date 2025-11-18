@@ -7,6 +7,7 @@ import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
+import org.pojobook.parser.ConditionName;
 import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.FieldDefinition;
 
@@ -136,38 +137,40 @@ public abstract class AbstractPojoGenerator {
 
     /**
      * Add initialization statement in constructor.
+     * Note: Most fields are now initialized at declaration.
+     * Constructor initialization is only needed for nested class arrays.
      */
     protected void addConstructorInitialization(MethodSpec.Builder constructor, FieldNode node) {
         FieldDefinition field = node.getField();
 
+        // Skip 88-level condition names
+        if (field.getLevel() == 88) {
+            return;
+        }
+
         if (shouldGenerateNestedClass(field, node)) {
+            // Nested class arrays need initialization in constructor because
+            // each element must be instantiated individually
             initializeNestedClassArray(constructor, field);
         } else if (shouldFlattenGroup(field)) {
             node.getChildren().forEach(child -> addConstructorInitialization(constructor, child));
-        } else {
-            initializeSimpleField(constructor, field);
         }
+        // Simple fields are now initialized at declaration, so no action needed here
     }
 
     private void initializeNestedClassArray(MethodSpec.Builder constructor, FieldDefinition field) {
         String fieldName = fieldNameTracker.getJavaFieldName(field);
         String className = NamingUtils.toPascalCase(field.getName());
-        constructor.addStatement("this.$L = new $L[$L]", fieldName, className, field.getOccurs());
         constructor.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
         constructor.addStatement("this.$L[i] = new $L()", fieldName, className);
         constructor.endControlFlow();
     }
 
-    private void initializeSimpleField(MethodSpec.Builder constructor, FieldDefinition field) {
-        String fieldName = fieldNameTracker.getJavaFieldName(field);
-        String defaultValue = getDefaultValue(field);
-        constructor.addStatement("this.$L = $L", fieldName, defaultValue);
-    }
 
     /**
      * Get default value for a field.
      */
-    private String getDefaultValue(FieldDefinition field) {
+    protected String getDefaultValue(FieldDefinition field) {
         if (field.getOccurs() > 1) {
             String typeName = getBaseJavaType(field).toString();
             return String.format("new %s[%d]", typeName, field.getOccurs());
@@ -192,6 +195,11 @@ public abstract class AbstractPojoGenerator {
     protected void addGettersSetters(TypeSpec.Builder builder, FieldNode node) {
         FieldDefinition field = node.getField();
 
+        // Skip 88-level fields
+        if (field.getLevel() == 88) {
+            return;
+        }
+
         if (shouldGenerateNestedClass(field, node)) {
             String arrayType = NamingUtils.toPascalCase(field.getName()) + "[]";
             addGetterSetterForField(builder, field, arrayType);
@@ -199,6 +207,91 @@ public abstract class AbstractPojoGenerator {
             node.getChildren().forEach(child -> addGettersSetters(builder, child));
         } else {
             addGetterSetterForField(builder, field, getJavaType(field).toString());
+        }
+
+        // Add condition name methods for this field
+        addConditionNameMethods(builder, field);
+    }
+
+    /**
+     * Add condition name (88-level) checker methods for a field.
+     */
+    protected void addConditionNameMethods(TypeSpec.Builder builder, FieldDefinition field) {
+        if (!field.hasConditionNames()) {
+            return;
+        }
+
+        String fieldName = fieldNameTracker.getJavaFieldName(field);
+        TypeName fieldType = getJavaType(field);
+        boolean isNumeric = isNumericType(fieldType.toString());
+
+        for (ConditionName condition : field.getConditionNames()) {
+            // Create unique method name: is<FieldName><ConditionName>
+            // E.g., for field "NM-FUNCTION" with condition "CONSULT" -> "isNmFunctionConsult"
+            String fieldNameCamel = NamingUtils.toCamelCase(field.getName());
+            String conditionNameCamel = NamingUtils.toCamelCase(condition.getName());
+            String methodName = "is" + Character.toUpperCase(fieldNameCamel.charAt(0)) + fieldNameCamel.substring(1)
+                    + Character.toUpperCase(conditionNameCamel.charAt(0)) + conditionNameCamel.substring(1);
+
+            MethodSpec.Builder method = MethodSpec.methodBuilder(methodName)
+                    .addModifiers(Modifier.PUBLIC)
+                    .returns(boolean.class)
+                    .addJavadoc("Check if $L matches condition $L.\n", fieldName, condition.getName())
+                    .addJavadoc("@return true if $L equals one of: $L\n",
+                            fieldName,
+                            String.join(", ", condition.getValues()));
+
+            // Generate the comparison logic
+            if (condition.getValues().length == 1) {
+                // Single value comparison
+                if (isNumeric) {
+                    // For numeric fields, parse and compare to the numeric value (e.g., nbActlen.equals(496))
+                    try {
+                        // Try to parse as integer to generate proper numeric literal
+                        Integer.parseInt(condition.getValues()[0].trim());
+                        method.addStatement("return $L != null && $L.equals($L)",
+                                fieldName, fieldName, condition.getValues()[0].trim());
+                    } catch (NumberFormatException e) {
+                        // Fall back to string comparison if not a valid number
+                        method.addStatement("return $L != null && $L.equals($S)",
+                                fieldName, fieldName, condition.getValues()[0]);
+                    }
+                } else {
+                    // For string fields, compare to the string value
+                    method.addStatement("return $L != null && $L.equals($S)",
+                            fieldName, fieldName, condition.getValues()[0]);
+                }
+            } else {
+                // Multiple values comparison
+                method.beginControlFlow("if ($L == null)", fieldName)
+                        .addStatement("return false")
+                        .endControlFlow();
+
+                CodeBlock.Builder codeBlock = CodeBlock.builder()
+                        .add("return ");
+
+                for (int i = 0; i < condition.getValues().length; i++) {
+                    if (i > 0) {
+                        codeBlock.add(" || ");
+                    }
+                    if (isNumeric) {
+                        try {
+                            // Try to parse as integer to generate proper numeric literal
+                            Integer.parseInt(condition.getValues()[i].trim());
+                            codeBlock.add("$L.equals($L)", fieldName, condition.getValues()[i].trim());
+                        } catch (NumberFormatException e) {
+                            // Fall back to string comparison if not a valid number
+                            codeBlock.add("$L.equals($S)", fieldName, condition.getValues()[i]);
+                        }
+                    } else {
+                        codeBlock.add("$L.equals($S)", fieldName, condition.getValues()[i]);
+                    }
+                }
+
+                method.addStatement(codeBlock.build());
+            }
+
+            builder.addMethod(method.build());
         }
     }
 
@@ -239,7 +332,7 @@ public abstract class AbstractPojoGenerator {
     }
 
     private void addValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
-                                           String fieldName, String javaType) {
+                                            String fieldName, String javaType) {
         ClassName utilClass = ClassName.get("org.pojobook.util", "FieldLengthUtil");
 
         // Add assignment with validation inline
@@ -431,6 +524,11 @@ public abstract class AbstractPojoGenerator {
     private void collectToStringParts(FieldNode node, List<CodeBlock> parts) {
         FieldDefinition field = node.getField();
 
+        // Skip 88-level condition names
+        if (field.getLevel() == 88) {
+            return;
+        }
+
         if (shouldFlattenGroup(field)) {
             node.getChildren().forEach(child -> collectToStringParts(child, parts));
         } else {
@@ -535,6 +633,11 @@ public abstract class AbstractPojoGenerator {
     private void collectFieldNames(FieldNode node, List<String> names) {
         FieldDefinition field = node.getField();
 
+        // Skip 88-level condition names
+        if (field.getLevel() == 88) {
+            return;
+        }
+
         if (shouldFlattenGroup(field)) {
             node.getChildren().forEach(child -> collectFieldNames(child, names));
         } else {
@@ -582,6 +685,11 @@ public abstract class AbstractPojoGenerator {
      */
     protected Stream<FieldSpec> expandFieldNode(FieldNode node) {
         FieldDefinition field = node.getField();
+
+        // Skip 88-level condition names - they are handled as methods
+        if (field.getLevel() == 88) {
+            return Stream.empty();
+        }
 
         if (isGroupWithOccurs(field, node)) {
             return Stream.of(createArrayField(field));

@@ -3,8 +3,6 @@ package org.pojobook.serializer;
 import org.pojobook.annotation.CobolField;
 import org.pojobook.annotation.CobolRecord;
 import org.pojobook.exception.SerializationException;
-import org.pojobook.util.DisplayNumericUtil;
-import org.pojobook.util.SignedNumericUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,9 +10,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
@@ -352,13 +347,33 @@ public class CobolSerializer {
     }
 
     /**
+     * Serialize a DISPLAY field.
+     */
+    private byte[] serializeDisplay(Object value, int length, int decimalDigits, boolean isNumeric,
+                                    boolean signed, boolean signSeparate, boolean isSignLeading,
+                                    Charset charset) {
+        if (signed && signSeparate && value instanceof Number) {
+            return CobolFieldSerializer.serializeDisplayWithSeparateSign((Number) value, length, decimalDigits, isSignLeading, charset);
+        }
+
+        if (signed && !signSeparate && value instanceof Number && isNumeric) {
+            return CobolFieldSerializer.serializeDisplayWithEmbeddedSign((Number) value, length, decimalDigits, charset);
+        }
+
+        if (!signed && decimalDigits > 0 && value instanceof Number && isNumeric) {
+            return CobolFieldSerializer.serializeDisplayWithImpliedDecimal((Number) value, length, decimalDigits, charset);
+        }
+
+        return CobolFieldSerializer.serializeDisplayString(value, length, isNumeric, charset);
+    }
+
+    /**
      * Serialize DISPLAY field.
      */
     private byte[] serializeDisplay(Object value, CobolField field, Charset charset) {
-        boolean isNumeric = isNumericPicture(field.picture());
         int length = field.length() > 0 ? field.length() : field.integerDigits() + field.decimalDigits();
 
-        return CobolFieldSerializer.serializeDisplay(value, length, field.decimalDigits(), isNumeric,
+        return serializeDisplay(value, length, field.decimalDigits(), isNumericPicture(field.picture()),
                 field.signed(), field.signSeparate(), "LEADING".equalsIgnoreCase(field.signPosition()), charset);
     }
 
@@ -366,15 +381,13 @@ public class CobolSerializer {
      * Serialize DISPLAY field with pre-calculated length (optimized).
      */
     private byte[] serializeDisplayWithLength(Object value, CobolField field, int baseLength, Charset charset) {
-        boolean isNumeric = isNumericPicture(field.picture());
-
         // If sign is separate, baseLength includes the sign byte, but we need just the digits
         int digitLength = baseLength;
         if (field.signed() && field.signSeparate()) {
             digitLength = baseLength - 1;
         }
 
-        return CobolFieldSerializer.serializeDisplay(value, digitLength, field.decimalDigits(), isNumeric,
+        return serializeDisplay(value, digitLength, field.decimalDigits(), isNumericPicture(field.picture()),
                 field.signed(), field.signSeparate(), "LEADING".equalsIgnoreCase(field.signPosition()), charset);
     }
 
@@ -386,8 +399,7 @@ public class CobolSerializer {
      * Serialize COMP/BINARY field.
      */
     private byte[] serializeComp(Object value, CobolField field) {
-        int totalDigits = field.integerDigits() + field.decimalDigits();
-        return CobolFieldSerializer.serializeComp(value, totalDigits);
+        return CobolFieldSerializer.serializeComp(value, field.integerDigits() + field.decimalDigits());
     }
 
     /**

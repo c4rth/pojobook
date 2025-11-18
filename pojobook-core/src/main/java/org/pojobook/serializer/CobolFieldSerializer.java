@@ -17,27 +17,6 @@ import java.nio.charset.Charset;
 public class CobolFieldSerializer {
 
     /**
-     * Serialize a DISPLAY field.
-     */
-    public static byte[] serializeDisplay(Object value, int length, int decimalDigits, boolean isNumeric,
-                                          boolean signed, boolean signSeparate, boolean isSignLeading,
-                                          Charset charset) {
-        if (signed && signSeparate && value instanceof Number) {
-            return serializeDisplayWithSeparateSign((Number) value, length, decimalDigits, isSignLeading, charset);
-        }
-
-        if (signed && !signSeparate && value instanceof Number && isNumeric) {
-            return serializeDisplayWithEmbeddedSign((Number) value, length, decimalDigits, charset);
-        }
-
-        if (!signed && decimalDigits > 0 && value instanceof Number && isNumeric) {
-            return serializeDisplayWithImpliedDecimal((Number) value, length, decimalDigits, charset);
-        }
-
-        return serializeDisplayString(value, length, isNumeric, charset);
-    }
-
-    /**
      * Serialize DISPLAY string.
      */
     public static byte[] serializeDisplayString(Object value, int length, boolean isNumeric, Charset charset) {
@@ -76,7 +55,8 @@ public class CobolFieldSerializer {
      * Serialize DISPLAY field with embedded sign (overpunch notation).
      */
     public static byte[] serializeDisplayWithEmbeddedSign(Number value, int length, int decimalDigits, Charset charset) {
-        return SignedNumericUtil.formatSignedDisplay(value, length, decimalDigits, charset);
+        String formatted = SignedNumericUtil.formatSignedNumeric(value, length, decimalDigits);
+        return formatted.getBytes(charset);
     }
 
     /**
@@ -212,6 +192,186 @@ public class CobolFieldSerializer {
         }
 
         return result;
+    }
+
+    // ========================================================================
+    // Direct-write methods for optimized serialization (zero-allocation)
+    // ========================================================================
+
+    /**
+     * Serialize DISPLAY string directly to buffer at specified offset.
+     * This avoids intermediate byte array allocation for better performance.
+     */
+    public static void serializeDisplayStringDirect(byte[] buffer, int offset, Object value, int length,
+                                                    boolean isNumeric, Charset charset) {
+        String strValue = value != null ? value.toString() : "";
+        int strLen = strValue.length();
+
+        if (strLen < length) {
+            int padding = length - strLen;
+            if (isNumeric) {
+                // Numeric: pad left with zeros
+                strValue = "0".repeat(padding) + strValue;
+            } else {
+                // Alphanumeric: pad right with spaces
+                strValue = strValue + " ".repeat(padding);
+            }
+        } else if (strLen > length) {
+            strValue = strValue.substring(0, length);
+        }
+
+        byte[] bytes = strValue.getBytes(charset);
+        System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+    }
+
+    /**
+     * Serialize DISPLAY field with implied decimal directly to buffer.
+     */
+    public static void serializeDisplayWithImpliedDecimalDirect(byte[] buffer, int offset, Number value,
+                                                                int length, int decimalDigits, Charset charset) {
+        byte[] bytes = DisplayNumericUtil.formatUnsignedWithImpliedDecimal(value, length, decimalDigits, charset);
+        System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+    }
+
+    /**
+     * Serialize DISPLAY field with embedded sign directly to buffer.
+     */
+    public static void serializeDisplayWithEmbeddedSignDirect(byte[] buffer, int offset, Number value,
+                                                              int length, int decimalDigits, Charset charset) {
+        String formatted = SignedNumericUtil.formatSignedNumeric(value, length, decimalDigits);
+        byte[] bytes = formatted.getBytes(charset);
+        System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+    }
+
+    /**
+     * Serialize DISPLAY field with SIGN LEADING/TRAILING SEPARATE directly to buffer.
+     */
+    public static void serializeDisplayWithSeparateSignDirect(byte[] buffer, int offset, Number value,
+                                                              int length, int decimalDigits,
+                                                              boolean isSignLeading, Charset charset) {
+        BigDecimal decimal = toBigDecimal(value);
+        if (decimalDigits > 0) {
+            decimal = decimal.setScale(decimalDigits, RoundingMode.HALF_UP);
+        }
+
+        String unscaledValue = formatUnscaledValueForDigits(decimal.abs(), length);
+        byte signByte = getSignByte(decimal, charset);
+        byte[] digitBytes = unscaledValue.getBytes(charset);
+
+        if (isSignLeading) {
+            buffer[offset] = signByte;
+            System.arraycopy(digitBytes, 0, buffer, offset + 1, digitBytes.length);
+        } else {
+            System.arraycopy(digitBytes, 0, buffer, offset, digitBytes.length);
+            buffer[offset + digitBytes.length] = signByte;
+        }
+    }
+
+    /**
+     * Serialize COMP/BINARY field directly to buffer.
+     */
+    public static void serializeCompDirect(byte[] buffer, int offset, Object value, int totalDigits) {
+        long longValue = value != null ? ((Number) value).longValue() : 0L;
+
+        if (totalDigits <= 4) {
+            short shortValue = (short) longValue;
+            buffer[offset] = (byte) (shortValue >> 8);
+            buffer[offset + 1] = (byte) shortValue;
+        } else if (totalDigits <= 9) {
+            int intValue = (int) longValue;
+            buffer[offset] = (byte) (intValue >> 24);
+            buffer[offset + 1] = (byte) (intValue >> 16);
+            buffer[offset + 2] = (byte) (intValue >> 8);
+            buffer[offset + 3] = (byte) intValue;
+        } else {
+            buffer[offset] = (byte) (longValue >> 56);
+            buffer[offset + 1] = (byte) (longValue >> 48);
+            buffer[offset + 2] = (byte) (longValue >> 40);
+            buffer[offset + 3] = (byte) (longValue >> 32);
+            buffer[offset + 4] = (byte) (longValue >> 24);
+            buffer[offset + 5] = (byte) (longValue >> 16);
+            buffer[offset + 6] = (byte) (longValue >> 8);
+            buffer[offset + 7] = (byte) longValue;
+        }
+    }
+
+    /**
+     * Serialize COMP-1 (float) field directly to buffer.
+     */
+    public static void serializeComp1Direct(byte[] buffer, int offset, Object value) {
+        float floatValue = value != null ? ((Number) value).floatValue() : 0.0f;
+        int intBits = Float.floatToRawIntBits(floatValue);
+        buffer[offset] = (byte) (intBits >> 24);
+        buffer[offset + 1] = (byte) (intBits >> 16);
+        buffer[offset + 2] = (byte) (intBits >> 8);
+        buffer[offset + 3] = (byte) intBits;
+    }
+
+    /**
+     * Serialize COMP-2 (double) field directly to buffer.
+     */
+    public static void serializeComp2Direct(byte[] buffer, int offset, Object value) {
+        double doubleValue = value != null ? ((Number) value).doubleValue() : 0.0;
+        long longBits = Double.doubleToRawLongBits(doubleValue);
+        buffer[offset] = (byte) (longBits >> 56);
+        buffer[offset + 1] = (byte) (longBits >> 48);
+        buffer[offset + 2] = (byte) (longBits >> 40);
+        buffer[offset + 3] = (byte) (longBits >> 32);
+        buffer[offset + 4] = (byte) (longBits >> 24);
+        buffer[offset + 5] = (byte) (longBits >> 16);
+        buffer[offset + 6] = (byte) (longBits >> 8);
+        buffer[offset + 7] = (byte) longBits;
+    }
+
+    /**
+     * Serialize COMP-3 (packed decimal) field directly to buffer.
+     */
+    public static void serializeComp3Direct(byte[] buffer, int offset, Object value, int totalDigits, int decimalDigits) {
+        BigDecimal bdValue = value != null ? new BigDecimal(value.toString()) : BigDecimal.ZERO;
+
+        if (decimalDigits > 0) {
+            bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
+        }
+
+        BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
+        String digits = String.format("%0" + totalDigits + "d", biValue.abs().longValue());
+
+        int byteLength = (totalDigits / 2) + 1;
+        int digitIndex = 0;
+
+        for (int i = 0; i < byteLength - 1; i++) {
+            int high = digits.charAt(digitIndex++) - '0';
+            int low = digits.charAt(digitIndex++) - '0';
+            buffer[offset + i] = (byte) ((high << 4) | low);
+        }
+
+        int lastDigit = (totalDigits % 2 != 0) ? (digits.charAt(digitIndex) - '0') : 0;
+        int sign = biValue.signum() < 0 ? 0x0D : 0x0C;
+        buffer[offset + byteLength - 1] = (byte) ((lastDigit << 4) | sign);
+    }
+
+    /**
+     * Serialize ZONED-DECIMAL field directly to buffer.
+     */
+    public static void serializeZonedDecimalDirect(byte[] buffer, int offset, Object value,
+                                                   int totalDigits, int decimalDigits, boolean signed) {
+        BigDecimal bdValue = value != null ? new BigDecimal(value.toString()) : BigDecimal.ZERO;
+
+        if (decimalDigits > 0) {
+            bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
+        }
+
+        long longValue = bdValue.setScale(0, RoundingMode.HALF_UP).longValue();
+        String digits = String.format("%0" + totalDigits + "d", Math.abs(longValue));
+
+        for (int i = 0; i < totalDigits; i++) {
+            byte digit = (byte) (digits.charAt(i) - '0');
+            if (i == totalDigits - 1 && signed) {
+                buffer[offset + i] = (byte) ((longValue < 0 ? 0xD0 : 0xC0) | digit);
+            } else {
+                buffer[offset + i] = (byte) (0xF0 | digit);
+            }
+        }
     }
 }
 

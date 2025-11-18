@@ -3,6 +3,8 @@ package org.pojobook.benchmark;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Group;
+import org.openjdk.jmh.annotations.GroupThreads;
 import org.openjdk.jmh.annotations.Measurement;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
@@ -22,22 +24,23 @@ import java.nio.charset.Charset;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Comprehensive JMH Benchmark for full round-trip (serialization + deserialization).
- * This represents real-world usage where data is read, processed, and written.
+ * Multi-threaded JMH Benchmark for testing concurrent serialization/deserialization.
+ * Tests the thread-safety and performance of the library under concurrent load.
+ * This benchmark uses JMH's @Group annotation to simulate realistic concurrent usage
+ * where multiple threads are reading and writing data simultaneously.
  */
-@BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.NANOSECONDS)
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Benchmark)
 @Fork(value = 1, warmups = 1)
 @Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 2)
-public class CopybookRoundTripBenchmark {
+@Measurement(iterations = 5, time = 3)
+public class CopybookMultiThreadedBenchmark {
 
     private static final Charset CHARSET = Charset.forName("CP1047");
 
     private byte[] copybookData;
     private PojoBook pojoBook;
-
     private CopybookConverter copybookConverter;
 
     @Setup
@@ -46,7 +49,7 @@ public class CopybookRoundTripBenchmark {
         pojoBook = new PojoBook();
         // Initialize CopybookConverter
         copybookConverter = new CopybookConverter();
-        //
+        // Create test data
         copybookData = createTestData();
     }
 
@@ -111,35 +114,94 @@ public class CopybookRoundTripBenchmark {
         };
     }
 
+    // =====================================================================
+    // Embedded Serialization - Multi-threaded Group Tests
+    // =====================================================================
+
+    /**
+     * Test with 4 threads doing round-trip operations concurrently.
+     * This simulates a realistic high-load scenario.
+     */
     @Benchmark
-    public byte[] benchmarkEmbeddedRoundTrip() throws Exception {
-        // Deserialize
+    @Group("embeddedConcurrent4")
+    @GroupThreads(4)
+    public byte[] embeddedRoundTrip4Threads() throws Exception {
         org.pojobook.samples.embedded.SampleCbk pojo =
                 org.pojobook.samples.embedded.SampleCbk.deserialize(copybookData, CHARSET);
-        // Serialize
         return pojo.serialize(CHARSET);
     }
 
+    /**
+     * Test with 8 threads doing round-trip operations concurrently.
+     * Tests scalability under higher contention.
+     */
     @Benchmark
-    public byte[] benchmarkAnnotationRoundTrip() throws Exception {
-        // Deserialize
+    @Group("embeddedConcurrent8")
+    @GroupThreads(8)
+    public byte[] embeddedRoundTrip8Threads() throws Exception {
+        org.pojobook.samples.embedded.SampleCbk pojo =
+                org.pojobook.samples.embedded.SampleCbk.deserialize(copybookData, CHARSET);
+        return pojo.serialize(CHARSET);
+    }
+
+    // =====================================================================
+    // Annotation-based Serialization - Multi-threaded Group Tests
+    // =====================================================================
+
+    /**
+     * Test annotation-based approach with 4 concurrent threads.
+     */
+    @Benchmark
+    @Group("annotationConcurrent4")
+    @GroupThreads(4)
+    public byte[] annotationRoundTrip4Threads() throws Exception {
         org.pojobook.samples.annotation.SampleCbk pojo =
                 pojoBook.deserialize(copybookData, org.pojobook.samples.annotation.SampleCbk.class, CHARSET);
-        // Serialize
         return pojoBook.serialize(pojo, CHARSET);
     }
 
+    /**
+     * Test annotation-based approach with 8 concurrent threads.
+     */
     @Benchmark
-    public byte[] benchmarkJRecordRoundTrip() throws Exception {
-        // Deserialize
+    @Group("annotationConcurrent8")
+    @GroupThreads(8)
+    public byte[] annotationRoundTrip8Threads() throws Exception {
+        org.pojobook.samples.annotation.SampleCbk pojo =
+                pojoBook.deserialize(copybookData, org.pojobook.samples.annotation.SampleCbk.class, CHARSET);
+        return pojoBook.serialize(pojo, CHARSET);
+    }
+
+    // =====================================================================
+    // JRecord - Multi-threaded Group Tests
+    // =====================================================================
+
+    /**
+     * Test JRecord with 4 concurrent threads for comparison.
+     */
+    @Benchmark
+    @Group("jrecordConcurrent4")
+    @GroupThreads(4)
+    public byte[] jrecordRoundTrip4Threads() throws Exception {
         LineSampleCbkPojo pojo = copybookConverter.convertToCopybookModel(copybookData);
-        // Serialize
+        return copybookConverter.convertToCopybookData(pojo);
+    }
+
+    /**
+     * Test JRecord with 8 concurrent threads for comparison.
+     */
+    @Benchmark
+    @Group("jrecordConcurrent8")
+    @GroupThreads(8)
+    public byte[] jrecordRoundTrip8Threads() throws Exception {
+        LineSampleCbkPojo pojo = copybookConverter.convertToCopybookModel(copybookData);
         return copybookConverter.convertToCopybookData(pojo);
     }
 
     public static void main(String[] args) throws RunnerException {
         Options opt = new OptionsBuilder()
-                .include(CopybookRoundTripBenchmark.class.getSimpleName())
+                .include(CopybookMultiThreadedBenchmark.class.getSimpleName())
+                .threads(Runtime.getRuntime().availableProcessors()) // Use all available cores
                 .build();
         new Runner(opt).run();
     }

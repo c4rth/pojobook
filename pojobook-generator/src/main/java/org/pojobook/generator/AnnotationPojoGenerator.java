@@ -133,17 +133,22 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
 
     /**
      * Create simple field spec.
+     * Fields are initialized at declaration.
      */
     @Override
     protected FieldSpec createSimpleField(FieldDefinition field) {
         String fieldName = fieldNameTracker.toUniqueFieldName(field);
+        String defaultValue = getDefaultValue(field);
+
         return FieldSpec.builder(getJavaType(field), fieldName, Modifier.PRIVATE)
                 .addAnnotation(createCobolFieldAnnotation(field))
+                .initializer(defaultValue)
                 .build();
     }
 
     /**
      * Create array field spec.
+     * Array fields are initialized at declaration.
      */
     @Override
     protected FieldSpec createArrayField(FieldDefinition field) {
@@ -153,6 +158,7 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
 
         return FieldSpec.builder(fieldType, fieldName, Modifier.PRIVATE)
                 .addAnnotation(createCobolFieldAnnotation(field))
+                .initializer("new $L[$L]", className, field.getOccurs())
                 .build();
     }
 

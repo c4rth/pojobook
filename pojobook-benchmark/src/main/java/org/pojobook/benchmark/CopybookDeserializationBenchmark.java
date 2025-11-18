@@ -1,7 +1,5 @@
 package org.pojobook.benchmark;
 
-import org.pojobook.benchmark.codegen.CopybookConverter;
-import org.pojobook.benchmark.codegen.cobol.LineSampleCbkPojo;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -17,6 +15,8 @@ import org.openjdk.jmh.runner.RunnerException;
 import org.openjdk.jmh.runner.options.Options;
 import org.openjdk.jmh.runner.options.OptionsBuilder;
 import org.pojobook.PojoBook;
+import org.pojobook.benchmark.codegen.CopybookConverter;
+import org.pojobook.benchmark.codegen.cobol.LineSampleCbkPojo;
 
 import java.nio.charset.Charset;
 import java.util.concurrent.TimeUnit;
