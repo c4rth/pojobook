@@ -142,7 +142,7 @@ public class CobolFieldDeserializer {
         if (size == 8) {
             return BigInteger.valueOf(ByteBuffer.wrap(data, offset, size).getLong());
         }
-        return BigInteger.valueOf((long) ByteBuffer.wrap(data, offset, size).getInt());
+        return BigInteger.valueOf(ByteBuffer.wrap(data, offset, size).getInt());
     }
 
     /**

@@ -27,7 +27,6 @@ class Stru05OccursUsageTest {
         for (int i = 0; i < original.getComArray1().length; i++) {
             for (int j = 0; j < original.getComArray1()[i].getComArray2().length; j++) {
                 original.getComArray1()[i].getComArray2()[j].setComArray3("A,B,C,D,E".split(","));
-                ;
             }
         }
 
