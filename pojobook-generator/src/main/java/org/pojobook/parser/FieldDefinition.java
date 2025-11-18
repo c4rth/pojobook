@@ -210,6 +210,9 @@ public class FieldDefinition {
     public void setDescendingKey(boolean descendingKey) {
         this.descendingKey = descendingKey;
     }
+    public boolean isDescendingKey() {
+        return descendingKey;
+    }
 
     public int getOffset() {
         return offset;

@@ -18,6 +18,7 @@
         <mapstruct.version>1.6.3</mapstruct.version>
         <jrecord.version>0.93.3</jrecord.version>
         <jmh.version>1.37</jmh.version>
+        <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
     <dependencies>

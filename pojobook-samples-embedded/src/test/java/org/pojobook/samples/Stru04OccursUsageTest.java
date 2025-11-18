@@ -58,9 +58,9 @@ class Stru04OccursUsageTest {
         assertEquals((short) 3, deserialized.getComArray1()[2].getComItem2());
 
         // Verify int values preserved
-        assertEquals(Integer.valueOf(200), deserialized.getComArray1()[0].getComItem7());
-        assertEquals(Integer.valueOf(201), deserialized.getComArray1()[1].getComItem7());
-        assertEquals(Integer.valueOf(202), deserialized.getComArray1()[2].getComItem7());
+        assertEquals(200, deserialized.getComArray1()[0].getComItem7());
+        assertEquals(201, deserialized.getComArray1()[1].getComItem7());
+        assertEquals(202, deserialized.getComArray1()[2].getComItem7());
 
         // Debug: Print the values to see what was deserialized
         for (int i = 0; i < deserialized.getComArray1().length; i++) {

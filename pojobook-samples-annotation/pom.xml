@@ -11,6 +11,11 @@
     <artifactId>pojobook-samples-annotation</artifactId>
     <packaging>jar</packaging>
     <description>Sample applications demonstrating PojoBook usage with various COBOL copybook scenarios</description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.pojobook</groupId>

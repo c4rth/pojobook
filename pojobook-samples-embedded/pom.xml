@@ -13,6 +13,11 @@
     <description>Sample applications demonstrating PojoBook usage with embedded serialization (no annotations, no
         reflection)
     </description>
+
+    <properties>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.pojobook</groupId>

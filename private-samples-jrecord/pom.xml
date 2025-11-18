@@ -17,6 +17,7 @@
         <commons-lang3.version>3.19.0</commons-lang3.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <jrecord.version>0.93.3</jrecord.version>
+        <maven.deploy.skip>true</maven.deploy.skip>
     </properties>
 
     <dependencies>
