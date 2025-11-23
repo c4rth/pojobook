@@ -7,8 +7,7 @@ import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.project.MavenProject;
-import org.pojobook.generator.AnnotationPojoGenerator;
-import org.pojobook.generator.EmbeddedSerializationPojoGenerator;
+import org.pojobook.generator.GeneratorBuilder;
 import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.CopybookParser;
 import org.pojobook.parser.ParseException;
@@ -91,7 +90,6 @@ public class GenerateMojo extends AbstractMojo {
         validateParameters();
 
         try {
-            // Resolve copybook files (may include wildcards)
             List<File> copybookFiles = resolveCopybookFiles();
 
             if (copybookFiles.isEmpty()) {
@@ -101,20 +99,17 @@ public class GenerateMojo extends AbstractMojo {
 
             getLog().info("Found " + copybookFiles.size() + " copybook file(s) to process");
 
-            // Process each copybook file
             for (File file : copybookFiles) {
                 processOneCopybookFile(file);
             }
 
-            // Add output directory to compile source roots (only once)
             project.addCompileSourceRoot(outputDirectory.getAbsolutePath());
-
             getLog().info("POJO generation completed successfully for " + copybookFiles.size() + " file(s)");
 
         } catch (IOException e) {
             throw new MojoExecutionException("Failed to read copybook file or write output", e);
-        } catch (Exception e) {
-            throw new MojoExecutionException("Error generating POJO from copybook", e);
+        } catch (ParseException e) {
+            throw new MojoExecutionException("Error parsing copybook: " + e.getMessage(), e);
         }
     }
 
@@ -124,7 +119,6 @@ public class GenerateMojo extends AbstractMojo {
     private void processOneCopybookFile(File file) throws IOException, ParseException {
         getLog().info("Parsing copybook file: " + file.getAbsolutePath());
 
-        // Parse the copybook
         CopybookParser parser = new CopybookParser();
         CopybookDefinition definition = parser.parse(file.toPath());
 
@@ -132,32 +126,31 @@ public class GenerateMojo extends AbstractMojo {
                 (definition.getRecordName() != null ? definition.getRecordName() : "Anonymous") +
                 ", Fields: " + definition.getFields().size());
 
-        // Determine class name - use record name if available, otherwise use filename
-        String className = toClassName(definition.getRecordName() != null ?
-                definition.getRecordName() :
-                getFileNameWithoutExtension(file));
+        // Determine class name from record name or filename
+        String className = definition.getRecordName() != null && !definition.getRecordName().isEmpty()
+                ? toClassName(definition.getRecordName())
+                : toClassName(getFileNameWithoutExtension(file));
 
-        // If record name was null/anonymous, set it to the derived class name
-        // so the generator uses the correct name
         if (definition.getRecordName() == null || definition.getRecordName().isEmpty()) {
             definition.setRecordName(className);
         }
 
-        // Determine output file path
-        Path packagePath = Paths.get(outputDirectory.getAbsolutePath())
-                .resolve(packageName.replace('.', File.separatorChar));
-
-        Path outputFile = packagePath.resolve(className + ".java");
+        // Generate output path
+        Path outputFile = Paths.get(outputDirectory.getAbsolutePath())
+                .resolve(packageName.replace('.', File.separatorChar))
+                .resolve(className + ".java");
 
         getLog().info("Generating POJO class: " + className);
         getLog().info("Generator type: " + generatorType);
         getLog().info("Output file: " + outputFile.toAbsolutePath());
 
-        // Generate the POJO based on generator type
+        // Generate the POJO using GeneratorBuilder
         if ("embedded".equalsIgnoreCase(generatorType)) {
-            generateWithEmbeddedSerializer(definition, outputFile);
+            GeneratorBuilder.embeddedGenerator(packageName)
+                    .generateToFile(definition, outputFile);
         } else {
-            generateWithAnnotations(definition, outputFile);
+            GeneratorBuilder.annotationGenerator(packageName)
+                    .generateToFile(definition, outputFile);
         }
 
         getLog().info("Successfully generated: " + className);
@@ -169,25 +162,16 @@ public class GenerateMojo extends AbstractMojo {
     private List<File> resolveCopybookFiles() throws IOException {
         List<File> files = new ArrayList<>();
 
-        // Check if copybookFile contains wildcards
+        // Build absolute path
+        Path basePath = new File(copybookFile).isAbsolute()
+                ? Paths.get(copybookFile)
+                : project.getBasedir().toPath().resolve(copybookFile);
+
+        // Check if pattern contains wildcards
         if (copybookFile.contains("*") || copybookFile.contains("?")) {
-            // Pattern contains wildcards - build absolute pattern string manually
-            String pattern;
-            if (new File(copybookFile).isAbsolute()) {
-                pattern = copybookFile;
-            } else {
-                pattern = project.getBasedir().getAbsolutePath() + File.separator + copybookFile.replace("/", File.separator);
-            }
-            files.addAll(resolveWildcardPattern(pattern));
+            files.addAll(resolveWildcardPattern(basePath.toString()));
         } else {
-            // No wildcards - treat as single file
-            Path patternPath;
-            if (new File(copybookFile).isAbsolute()) {
-                patternPath = Paths.get(copybookFile);
-            } else {
-                patternPath = project.getBasedir().toPath().resolve(copybookFile);
-            }
-            File singleFile = patternPath.toFile();
+            File singleFile = basePath.toFile();
             if (singleFile.exists() && singleFile.isFile()) {
                 files.add(singleFile);
             }
@@ -209,8 +193,7 @@ public class GenerateMojo extends AbstractMojo {
         );
 
         if (firstWildcard == Integer.MAX_VALUE) {
-            // No wildcard found
-            return matchedFiles;
+            return matchedFiles; // No wildcard found
         }
 
         // Find the last directory separator before the wildcard
@@ -230,24 +213,14 @@ public class GenerateMojo extends AbstractMojo {
 
         // Check if pattern includes ** (recursive)
         boolean recursive = filePattern.contains("**");
+        String simplePattern = recursive
+                ? filePattern.replace("**" + File.separator, "").replace("**", "")
+                : filePattern;
 
-        if (recursive) {
-            // Handle ** recursive pattern
-            String simplePattern = filePattern.replace("**" + File.separator, "")
-                    .replace("**", "");
-
-            try (Stream<Path> paths = Files.walk(basePath)) {
-                paths.filter(Files::isRegularFile)
-                        .filter(p -> matchesPattern(p.getFileName().toString(), simplePattern))
-                        .forEach(p -> matchedFiles.add(p.toFile()));
-            }
-        } else {
-            // Non-recursive pattern
-            try (Stream<Path> paths = Files.list(basePath)) {
-                paths.filter(Files::isRegularFile)
-                        .filter(p -> matchesPattern(p.getFileName().toString(), filePattern))
-                        .forEach(p -> matchedFiles.add(p.toFile()));
-            }
+        try (Stream<Path> paths = recursive ? Files.walk(basePath) : Files.list(basePath)) {
+            paths.filter(Files::isRegularFile)
+                    .filter(p -> matchesPattern(p.getFileName().toString(), simplePattern))
+                    .forEach(p -> matchedFiles.add(p.toFile()));
         }
 
         return matchedFiles;
@@ -272,7 +245,6 @@ public class GenerateMojo extends AbstractMojo {
             throw new MojoFailureException("Parameter 'copybookFile' is required");
         }
 
-
         if (packageName == null || packageName.trim().isEmpty()) {
             throw new MojoFailureException("Parameter 'packageName' is required");
         }
@@ -281,7 +253,6 @@ public class GenerateMojo extends AbstractMojo {
             throw new MojoFailureException("Invalid Java package name: " + packageName);
         }
 
-        // Validate generator type
         if (generatorType != null &&
                 !generatorType.equalsIgnoreCase("annotation") &&
                 !generatorType.equalsIgnoreCase("embedded")) {
@@ -290,26 +261,6 @@ public class GenerateMojo extends AbstractMojo {
         }
     }
 
-    /**
-     * Generate POJO using annotation-based generator.
-     */
-    private void generateWithAnnotations(CopybookDefinition definition, Path outputFile) throws IOException {
-        AnnotationPojoGenerator generator = new AnnotationPojoGenerator()
-                .withPackage(packageName);
-
-        generator.generateToFile(definition, outputFile);
-    }
-
-    /**
-     * Generate POJO using embedded serialization generator.
-     */
-    private void generateWithEmbeddedSerializer(CopybookDefinition definition, Path outputFile) throws IOException {
-
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator()
-                .withPackage(packageName);
-
-        generator.generateToFile(definition, outputFile);
-    }
 
     /**
      * Validate Java package name.
@@ -365,16 +316,8 @@ public class GenerateMojo extends AbstractMojo {
     /**
      * Get filename without extension.
      */
-    private String getFileNameWithoutExtension(File file) {
-        String name = file.getName();
-        int lastDot = name.lastIndexOf('.');
-        return lastDot > 0 ? name.substring(0, lastDot) : name;
-    }
-
-    /**
-     * Get filename without extension from string.
-     */
-    private String getFileNameWithoutExtension(String name) {
+    private String getFileNameWithoutExtension(Object fileOrName) {
+        String name = fileOrName instanceof File ? ((File) fileOrName).getName() : fileOrName.toString();
         int lastDot = name.lastIndexOf('.');
         return lastDot > 0 ? name.substring(0, lastDot) : name;
     }

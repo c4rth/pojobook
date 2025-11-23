@@ -31,7 +31,7 @@
         <!-- Dependency versions -->
         <slf4j.version>2.0.17</slf4j.version>
         <junit.version>6.0.1</junit.version>
-        <javapoet.version>0.8.0</javapoet.version>
+        <javapoet.version>0.9.0</javapoet.version>
     </properties>
 
     <modules>

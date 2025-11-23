@@ -1,6 +1,5 @@
 package org.pojobook.generator;
 
-import com.palantir.javapoet.AnnotationSpec;
 import com.palantir.javapoet.ArrayTypeName;
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.FieldSpec;
@@ -8,9 +7,9 @@ import com.palantir.javapoet.JavaFile;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
-import org.pojobook.CobolDataType;
-import org.pojobook.annotation.CobolField;
 import org.pojobook.annotation.CobolRecord;
+import org.pojobook.generator.annotation.CobolAnnotationGenerator;
+import org.pojobook.generator.context.GeneratorContext;
 import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.FieldDefinition;
 
@@ -20,15 +19,35 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 /**
- * Generates POJO classes from COBOL copybook definitions using JavaPoet.
+ * Generates POJO classes from COBOL copybook definitions using annotations.
+ * Uses GeneratorContext for centralized dependency management.
  */
 public class AnnotationPojoGenerator extends AbstractPojoGenerator {
 
     private String packageName = "org.pojobook.generated";
+    
+    // Annotation-specific helper
+    private final CobolAnnotationGenerator annotationGenerator;
+
+    /**
+     * Constructor using default context.
+     * Package-private - use GeneratorBuilder to create instances.
+     */
+    AnnotationPojoGenerator() {
+        this(new GeneratorContext());
+    }
+
+    /**
+     * Constructor with custom context (for dependency injection).
+     * Package-private - use GeneratorBuilder to create instances.
+     */
+    AnnotationPojoGenerator(GeneratorContext context) {
+        super(context);
+        this.annotationGenerator = new CobolAnnotationGenerator();
+    }
 
     public AnnotationPojoGenerator withPackage(String packageName) {
         this.packageName = packageName;
@@ -132,7 +151,7 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
     }
 
     /**
-     * Create simple field spec.
+     * Create simple field spec with COBOL annotation.
      * Fields are initialized at declaration.
      */
     @Override
@@ -141,13 +160,13 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
         String defaultValue = getDefaultValue(field);
 
         return FieldSpec.builder(getJavaType(field), fieldName, Modifier.PRIVATE)
-                .addAnnotation(createCobolFieldAnnotation(field))
+                .addAnnotation(annotationGenerator.createCobolFieldAnnotation(field))
                 .initializer(defaultValue)
                 .build();
     }
 
     /**
-     * Create array field spec.
+     * Create array field spec with COBOL annotation.
      * Array fields are initialized at declaration.
      */
     @Override
@@ -157,48 +176,11 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
         TypeName fieldType = ArrayTypeName.of(ClassName.bestGuess(className));
 
         return FieldSpec.builder(fieldType, fieldName, Modifier.PRIVATE)
-                .addAnnotation(createCobolFieldAnnotation(field))
+                .addAnnotation(annotationGenerator.createCobolFieldAnnotation(field))
                 .initializer("new $L[$L]", className, field.getOccurs())
                 .build();
     }
 
-    /**
-     * Create COBOL field annotation.
-     */
-    private AnnotationSpec createCobolFieldAnnotation(FieldDefinition field) {
-        AnnotationSpec.Builder builder = AnnotationSpec.builder(CobolField.class)
-                .addMember("level", "$L", field.getLevel())
-                .addMember("name", "$S", field.getName())
-                .addMember("type", "$T.$L", CobolDataType.class, field.getType());
-
-        // Add optional members
-        addOptionalMember(builder, "picture", field.getPicture());
-        addOptionalMemberIf(builder, "integerDigits", field.getIntegerDigits(), d -> d > 0);
-        addOptionalMemberIf(builder, "decimalDigits", field.getDecimalDigits(), d -> d > 0);
-        addOptionalMemberIf(builder, "signed", field.isSigned(), Boolean::booleanValue);
-        addOptionalMember(builder, "signPosition", field.getSignPosition());
-        addOptionalMemberIf(builder, "signSeparate", field.isSignSeparate(), Boolean::booleanValue);
-        addOptionalMemberIf(builder, "occurs", field.getOccurs(), o -> o > 1);
-
-        return builder.build();
-    }
-
-    /**
-     * Add optional string member to annotation builder.
-     */
-    private void addOptionalMember(AnnotationSpec.Builder builder, String name, String value) {
-        Optional.ofNullable(value)
-                .ifPresent(v -> builder.addMember(name, "$S", v));
-    }
-
-    /**
-     * Add optional member with predicate.
-     */
-    private <T> void addOptionalMemberIf(AnnotationSpec.Builder builder, String name, T value, Predicate<T> predicate) {
-        Optional.ofNullable(value)
-                .filter(predicate)
-                .ifPresent(v -> builder.addMember(name, "$L", v));
-    }
 
     /**
      * Add constructor to builder.

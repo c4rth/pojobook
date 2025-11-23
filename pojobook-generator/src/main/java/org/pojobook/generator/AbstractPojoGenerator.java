@@ -2,31 +2,63 @@ package org.pojobook.generator;
 
 import com.palantir.javapoet.ArrayTypeName;
 import com.palantir.javapoet.ClassName;
-import com.palantir.javapoet.CodeBlock;
 import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
-import org.pojobook.parser.ConditionName;
+import org.pojobook.generator.common.ConditionNameMethodGenerator;
+import org.pojobook.generator.common.FieldValidator;
+import org.pojobook.generator.common.GetterSetterGenerator;
+import org.pojobook.generator.common.ObjectMethodsGenerator;
+import org.pojobook.generator.common.TypeResolver;
+import org.pojobook.generator.context.GeneratorContext;
 import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.FieldDefinition;
 
-import javax.lang.model.element.Modifier;
 import java.io.IOException;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.stream.Stream;
 
+/**
+ * Base class for POJO generators using composition of specialized helpers.
+ * Uses GeneratorContext for centralized dependency management.
+ */
 public abstract class AbstractPojoGenerator {
 
-    protected final FieldNameTracker fieldNameTracker = new FieldNameTracker();
+    // Central context managing all dependencies
+    protected final GeneratorContext context;
+    
+    // Convenience accessors (delegating to context)
+    protected final FieldNameTracker fieldNameTracker;
+    protected final TypeResolver typeResolver;
+    protected final FieldValidator fieldValidator;
+    protected final GetterSetterGenerator getterSetterGenerator;
+    protected final ConditionNameMethodGenerator conditionNameMethodGenerator;
+    protected final ObjectMethodsGenerator objectMethodsGenerator;
+
+    /**
+     * Constructor using default context.
+     */
+    protected AbstractPojoGenerator() {
+        this(new GeneratorContext());
+    }
+
+    /**
+     * Constructor with custom context (for dependency injection).
+     */
+    protected AbstractPojoGenerator(GeneratorContext context) {
+        this.context = context;
+        // Initialize convenience accessors
+        this.fieldNameTracker = context.getFieldNameTracker();
+        this.typeResolver = context.getTypeResolver();
+        this.fieldValidator = context.getFieldValidator();
+        this.getterSetterGenerator = context.getGetterSetterGenerator();
+        this.conditionNameMethodGenerator = context.getConditionNameMethodGenerator();
+        this.objectMethodsGenerator = context.getObjectMethodsGenerator();
+    }
 
     public abstract String generate(CopybookDefinition definition);
 
@@ -86,53 +118,26 @@ public abstract class AbstractPojoGenerator {
     }
 
     /**
-     * Get base Java type for a field.
+     * Get base Java type for a field (delegates to TypeResolver).
      */
-    protected TypeName getBaseJavaType(FieldDefinition field) {
-        return switch (field.getType()) {
-            case DISPLAY -> getDisplayType(field);
-            case COMP, COMP_5 -> getCompType(field);
-            case COMP_1 -> ClassName.get(Float.class);
-            case COMP_2 -> ClassName.get(Double.class);
-            case COMP_3, PACKED_DECIMAL -> getPackedDecimalType(field);
-            case ZONED_DECIMAL -> ClassName.get(BigDecimal.class);
-        };
+    public TypeName getBaseJavaType(FieldDefinition field) {
+        return typeResolver.getBaseJavaType(field);
     }
 
-    private TypeName getDisplayType(FieldDefinition field) {
-        if (!isNumericField(field)) {
-            return ClassName.get(String.class);
-        }
-        return field.getDecimalDigits() > 0
-                ? ClassName.get(BigDecimal.class)
-                : getIntegerType(field.getIntegerDigits());
+    /**
+     * Get default value for a field (delegates to TypeResolver).
+     */
+    protected String getDefaultValue(FieldDefinition field) {
+        TypeName baseType = getBaseJavaType(field);
+        return typeResolver.getDefaultValue(field, baseType);
     }
 
-    private boolean isNumericField(FieldDefinition field) {
-        if (field.getIntegerDigits() == 0 || field.getPicture() == null) {
-            return false;
-        }
-        String pic = field.getPicture();
-        return pic.startsWith("9") || (field.isSigned() && pic.startsWith("S9"));
-    }
-
-    private TypeName getCompType(FieldDefinition field) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
-        if (totalDigits <= 4) return ClassName.get(Short.class);
-        if (totalDigits <= 9) return ClassName.get(Integer.class);
-        return ClassName.get(Long.class);
-    }
-
-    private TypeName getPackedDecimalType(FieldDefinition field) {
-        return field.getDecimalDigits() > 0
-                ? ClassName.get(BigDecimal.class)
-                : getIntegerType(field.getIntegerDigits());
-    }
-
-    private TypeName getIntegerType(int digits) {
-        if (digits <= 9) return ClassName.get(Integer.class);
-        if (digits <= 18) return ClassName.get(Long.class);
-        return ClassName.get(BigInteger.class);
+    /**
+     * Get Java type for a field (with array support).
+     */
+    public TypeName getJavaType(FieldDefinition field) {
+        TypeName baseType = getBaseJavaType(field);
+        return field.getOccurs() > 1 ? ArrayTypeName.of(baseType) : baseType;
     }
 
     /**
@@ -149,13 +154,11 @@ public abstract class AbstractPojoGenerator {
         }
 
         if (shouldGenerateNestedClass(field, node)) {
-            // Nested class arrays need initialization in constructor because
-            // each element must be instantiated individually
+            // Nested class arrays need initialization in constructor
             initializeNestedClassArray(constructor, field);
         } else if (shouldFlattenGroup(field)) {
             node.getChildren().forEach(child -> addConstructorInitialization(constructor, child));
         }
-        // Simple fields are now initialized at declaration, so no action needed here
     }
 
     private void initializeNestedClassArray(MethodSpec.Builder constructor, FieldDefinition field) {
@@ -168,29 +171,7 @@ public abstract class AbstractPojoGenerator {
 
 
     /**
-     * Get default value for a field.
-     */
-    protected String getDefaultValue(FieldDefinition field) {
-        if (field.getOccurs() > 1) {
-            String typeName = getBaseJavaType(field).toString();
-            return String.format("new %s[%d]", typeName, field.getOccurs());
-        }
-
-        return switch (getBaseJavaType(field).toString()) {
-            case "java.lang.String" -> "\"\"";
-            case "java.lang.Integer" -> "0";
-            case "java.lang.Long" -> "0L";
-            case "java.lang.Short" -> "(short) 0";
-            case "java.lang.Float" -> "0.0f";
-            case "java.lang.Double" -> "0.0";
-            case "java.math.BigDecimal" -> "java.math.BigDecimal.ZERO";
-            case "java.math.BigInteger" -> "java.math.BigInteger.ZERO";
-            default -> "null";
-        };
-    }
-
-    /**
-     * Add getters and setters.
+     * Add getters and setters (delegates to GetterSetterGenerator).
      */
     protected void addGettersSetters(TypeSpec.Builder builder, FieldNode node) {
         FieldDefinition field = node.getField();
@@ -201,12 +182,16 @@ public abstract class AbstractPojoGenerator {
         }
 
         if (shouldGenerateNestedClass(field, node)) {
-            String arrayType = NamingUtils.toPascalCase(field.getName()) + "[]";
-            addGetterSetterForField(builder, field, arrayType);
+            String fieldName = fieldNameTracker.getJavaFieldName(field);
+            String arrayType = NamingUtils.toPascalCase(field.getName());
+            TypeName fieldType = ArrayTypeName.of(ClassName.bestGuess(arrayType));
+            getterSetterGenerator.addGetterSetter(builder, field, fieldName, fieldType);
         } else if (shouldFlattenGroup(field)) {
             node.getChildren().forEach(child -> addGettersSetters(builder, child));
         } else {
-            addGetterSetterForField(builder, field, getJavaType(field).toString());
+            String fieldName = fieldNameTracker.getJavaFieldName(field);
+            TypeName fieldType = getJavaType(field);
+            getterSetterGenerator.addGetterSetter(builder, field, fieldName, fieldType);
         }
 
         // Add condition name methods for this field
@@ -214,460 +199,32 @@ public abstract class AbstractPojoGenerator {
     }
 
     /**
-     * Add condition name (88-level) checker methods for a field.
+     * Add condition name (88-level) checker methods (delegates to ConditionNameMethodGenerator).
      */
     protected void addConditionNameMethods(TypeSpec.Builder builder, FieldDefinition field) {
-        if (!field.hasConditionNames()) {
-            return;
-        }
-
         String fieldName = fieldNameTracker.getJavaFieldName(field);
-        TypeName fieldType = getJavaType(field);
-        boolean isNumeric = isNumericType(fieldType.toString());
-
-        for (ConditionName condition : field.getConditionNames()) {
-            // Create unique method name: is<FieldName><ConditionName>
-            // E.g., for field "NM-FUNCTION" with condition "CONSULT" -> "isNmFunctionConsult"
-            String fieldNameCamel = NamingUtils.toCamelCase(field.getName());
-            String conditionNameCamel = NamingUtils.toCamelCase(condition.getName());
-            String methodName = "is" + Character.toUpperCase(fieldNameCamel.charAt(0)) + fieldNameCamel.substring(1)
-                    + Character.toUpperCase(conditionNameCamel.charAt(0)) + conditionNameCamel.substring(1);
-
-            MethodSpec.Builder method = MethodSpec.methodBuilder(methodName)
-                    .addModifiers(Modifier.PUBLIC)
-                    .returns(boolean.class)
-                    .addJavadoc("Check if $L matches condition $L.\n", fieldName, condition.getName())
-                    .addJavadoc("@return true if $L equals one of: $L\n",
-                            fieldName,
-                            String.join(", ", condition.getValues()));
-
-            // Generate the comparison logic
-            if (condition.getValues().length == 1) {
-                // Single value comparison
-                if (isNumeric) {
-                    // For numeric fields, parse and compare to the numeric value (e.g., nbActlen.equals(496))
-                    try {
-                        // Try to parse as integer to generate proper numeric literal
-                        Integer.parseInt(condition.getValues()[0].trim());
-                        method.addStatement("return $L != null && $L.equals($L)",
-                                fieldName, fieldName, condition.getValues()[0].trim());
-                    } catch (NumberFormatException e) {
-                        // Fall back to string comparison if not a valid number
-                        method.addStatement("return $L != null && $L.equals($S)",
-                                fieldName, fieldName, condition.getValues()[0]);
-                    }
-                } else {
-                    // For string fields, compare to the string value
-                    method.addStatement("return $L != null && $L.equals($S)",
-                            fieldName, fieldName, condition.getValues()[0]);
-                }
-            } else {
-                // Multiple values comparison
-                method.beginControlFlow("if ($L == null)", fieldName)
-                        .addStatement("return false")
-                        .endControlFlow();
-
-                CodeBlock.Builder codeBlock = CodeBlock.builder()
-                        .add("return ");
-
-                for (int i = 0; i < condition.getValues().length; i++) {
-                    if (i > 0) {
-                        codeBlock.add(" || ");
-                    }
-                    if (isNumeric) {
-                        try {
-                            // Try to parse as integer to generate proper numeric literal
-                            Integer.parseInt(condition.getValues()[i].trim());
-                            codeBlock.add("$L.equals($L)", fieldName, condition.getValues()[i].trim());
-                        } catch (NumberFormatException e) {
-                            // Fall back to string comparison if not a valid number
-                            codeBlock.add("$L.equals($S)", fieldName, condition.getValues()[i]);
-                        }
-                    } else {
-                        codeBlock.add("$L.equals($S)", fieldName, condition.getValues()[i]);
-                    }
-                }
-
-                method.addStatement(codeBlock.build());
-            }
-
-            builder.addMethod(method.build());
-        }
+        conditionNameMethodGenerator.addConditionNameMethods(builder, field, fieldName);
     }
 
     /**
-     * Add getter and setter for a field.
-     */
-    private void addGetterSetterForField(TypeSpec.Builder builder, FieldDefinition field, String javaType) {
-        String fieldName = fieldNameTracker.getJavaFieldName(field);
-        String methodName = capitalizeFieldName(fieldName);
-        TypeName type = parseTypeName(javaType);
-
-        builder.addMethod(createGetter(methodName, fieldName, type));
-        builder.addMethod(createSetter(methodName, fieldName, type, field, javaType));
-    }
-
-    private String capitalizeFieldName(String fieldName) {
-        return Character.toUpperCase(fieldName.charAt(0)) + fieldName.substring(1);
-    }
-
-    private MethodSpec createGetter(String methodName, String fieldName, TypeName type) {
-        return MethodSpec.methodBuilder("get" + methodName)
-                .addModifiers(Modifier.PUBLIC)
-                .returns(type)
-                .addStatement("return $L", fieldName)
-                .build();
-    }
-
-    private MethodSpec createSetter(String methodName, String fieldName, TypeName type,
-                                    FieldDefinition field, String javaType) {
-        MethodSpec.Builder setter = MethodSpec.methodBuilder("set" + methodName)
-                .addModifiers(Modifier.PUBLIC)
-                .addParameter(type, fieldName)
-                .returns(void.class);
-
-        addValidationAndAssignment(setter, field, fieldName, javaType);
-
-        return setter.build();
-    }
-
-    private void addValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
-                                            String fieldName, String javaType) {
-        ClassName utilClass = ClassName.get("org.pojobook.util", "FieldLengthUtil");
-
-        // Add assignment with validation inline
-        if (javaType.equals("java.math.BigDecimal") || javaType.equals("BigDecimal")) {
-            addBigDecimalValidationAndAssignment(setter, field, fieldName, utilClass);
-        } else if (javaType.equals("java.math.BigDecimal[]") || javaType.equals("BigDecimal[]")) {
-            addBigDecimalArrayValidationAndAssignment(setter, field, fieldName, utilClass);
-        } else {
-            // For all other types, generate a single statement with inline validation
-            addSimpleValidationAndAssignment(setter, field, fieldName, javaType, utilClass);
-        }
-    }
-
-    private void addSimpleValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
-                                                  String fieldName, String javaType, ClassName utilClass) {
-        // String validation
-        if (javaType.equals("java.lang.String") && field.getIntegerDigits() > 0) {
-            setter.addStatement("this.$L = $T.checkStringLength($L, $L, $S)",
-                    fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            return;
-        }
-
-        // String array validation
-        if (javaType.contains("String") && javaType.endsWith("[]")) {
-            int maxLength = field.getIntegerDigits() > 0 ? field.getIntegerDigits() : 1;
-            setter.addStatement("this.$L = $T.checkStringArrayLength($L, $L, $S)",
-                    fieldName, utilClass, fieldName, maxLength, field.getName());
-            return;
-        }
-
-        // Numeric validation (non-BigDecimal)
-        if (field.getIntegerDigits() > 0 && isNumericType(javaType) && !javaType.contains("BigDecimal")) {
-            if (javaType.contains("BigInteger")) {
-                setter.addStatement("this.$L = $T.checkBigIntegerRange($L, $L, $S)",
-                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            } else if (javaType.contains("Integer")) {
-                setter.addStatement("this.$L = $T.checkIntegerRange($L, $L, $S)",
-                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            } else if (javaType.contains("Long")) {
-                setter.addStatement("this.$L = $T.checkLongRange($L, $L, $S)",
-                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            } else if (javaType.contains("Short")) {
-                setter.addStatement("this.$L = $T.checkShortRange($L, $L, $S)",
-                        fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            }
-            return;
-        }
-
-        // Numeric array validation (non-BigDecimal)
-        if (field.getIntegerDigits() > 0 && javaType.endsWith("[]")) {
-            String baseType = javaType.substring(0, javaType.length() - 2);
-            if (isNumericType(baseType) && !baseType.contains("BigDecimal")) {
-                if (baseType.contains("BigInteger")) {
-                    setter.addStatement("this.$L = $T.checkBigIntegerArrayRange($L, $L, $S)",
-                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                } else if (baseType.contains("Integer")) {
-                    setter.addStatement("this.$L = $T.checkIntegerArrayRange($L, $L, $S)",
-                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                } else if (baseType.contains("Long")) {
-                    setter.addStatement("this.$L = $T.checkLongArrayRange($L, $L, $S)",
-                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                } else if (baseType.contains("Short")) {
-                    setter.addStatement("this.$L = $T.checkShortArrayRange($L, $L, $S)",
-                            fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                }
-                return;
-            }
-        }
-
-        // Array length validation
-        if (javaType.endsWith("[]") && field.getOccurs() > 1) {
-            setter.addStatement("this.$L = $T.checkArrayLength($L, $L, $S)",
-                    fieldName, utilClass, fieldName, field.getOccurs(), field.getName());
-            return;
-        }
-
-        // No validation needed
-        setter.addStatement("this.$L = $L", fieldName, fieldName);
-    }
-
-    private void addBigDecimalValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
-                                                      String fieldName, ClassName utilClass) {
-        if (field.getIntegerDigits() > 0) {
-            // Store validated value once
-            setter.addStatement("$T validated = $T.checkBigDecimalRange($L, $L, $S)",
-                    BigDecimal.class, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            setter.beginControlFlow("if (validated != null)");
-            setter.addStatement("this.$L = validated.stripTrailingZeros()", fieldName);
-            setter.nextControlFlow("else");
-            setter.addStatement("this.$L = validated", fieldName);
-            setter.endControlFlow();
-        } else {
-            // No validation, just stripTrailingZeros
-            setter.beginControlFlow("if ($L != null)", fieldName);
-            setter.addStatement("this.$L = $L.stripTrailingZeros()", fieldName, fieldName);
-            setter.nextControlFlow("else");
-            setter.addStatement("this.$L = $L", fieldName, fieldName);
-            setter.endControlFlow();
-        }
-    }
-
-    private void addBigDecimalArrayValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
-                                                           String fieldName, ClassName utilClass) {
-        if (field.getIntegerDigits() > 0) {
-            // Store validated array once
-            setter.addStatement("$T[] validated = $T.checkBigDecimalArrayRange($L, $L, $S)",
-                    BigDecimal.class, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-        } else {
-            setter.addStatement("$T[] validated = $L", BigDecimal.class, fieldName);
-        }
-
-        setter.beginControlFlow("if (validated != null)");
-        setter.addStatement("this.$L = new $T[validated.length]", fieldName, BigDecimal.class);
-        setter.beginControlFlow("for (int i = 0; i < validated.length; i++)");
-        setter.beginControlFlow("if (validated[i] != null)");
-        setter.addStatement("this.$L[i] = validated[i].stripTrailingZeros()", fieldName);
-        setter.nextControlFlow("else");
-        setter.addStatement("this.$L[i] = null", fieldName);
-        setter.endControlFlow();
-        setter.endControlFlow();
-        setter.nextControlFlow("else");
-        setter.addStatement("this.$L = null", fieldName);
-        setter.endControlFlow();
-    }
-
-
-    private boolean isNumericType(String javaType) {
-        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*");
-    }
-
-    /**
-     * Parse type name from string.
-     */
-    private TypeName parseTypeName(String typeName) {
-        if (typeName.endsWith("[]")) {
-            String elementType = typeName.substring(0, typeName.length() - 2);
-            return ArrayTypeName.of(parseTypeName(elementType));
-        }
-
-        return switch (typeName) {
-            case "java.lang.String", "String" -> ClassName.get(String.class);
-            case "java.lang.Integer", "Integer" -> ClassName.get(Integer.class);
-            case "java.lang.Long", "Long" -> ClassName.get(Long.class);
-            case "java.lang.Short", "Short" -> ClassName.get(Short.class);
-            case "java.lang.Float", "Float" -> ClassName.get(Float.class);
-            case "java.lang.Double", "Double" -> ClassName.get(Double.class);
-            case "java.math.BigDecimal", "BigDecimal" -> ClassName.get(BigDecimal.class);
-            case "java.math.BigInteger", "BigInteger" -> ClassName.get(BigInteger.class);
-            default -> ClassName.bestGuess(typeName);
-        };
-    }
-
-    /**
-     * Get Java type for a field.
-     */
-    protected TypeName getJavaType(FieldDefinition field) {
-        TypeName baseType = getBaseJavaType(field);
-        return field.getOccurs() > 1 ? ArrayTypeName.of(baseType) : baseType;
-    }
-
-    /**
-     * Add toString method.
+     * Add toString method (delegates to ObjectMethodsGenerator).
      */
     protected void addToString(TypeSpec.Builder builder, String className, List<FieldNode> fieldTree) {
-        MethodSpec.Builder method = MethodSpec.methodBuilder("toString")
-                .addAnnotation(Override.class)
-                .addModifiers(Modifier.PUBLIC)
-                .returns(String.class);
-
-        CodeBlock.Builder code = CodeBlock.builder();
-        code.add("return $S + ", className + "{");
-
-        List<CodeBlock> parts = new ArrayList<>();
-        fieldTree.forEach(field -> collectToStringParts(field, parts));
-
-        for (int i = 0; i < parts.size(); i++) {
-            if (i > 0) code.add("$S + ", ", ");
-            code.add(parts.get(i));
-        }
-
-        code.add("$S;", "}");
-        method.addCode(code.build());
-        builder.addMethod(method.build());
+        objectMethodsGenerator.addToString(builder, className, fieldTree, fieldNameTracker::getJavaFieldName);
     }
 
     /**
-     * Add fields to toString.
-     */
-    private void collectToStringParts(FieldNode node, List<CodeBlock> parts) {
-        FieldDefinition field = node.getField();
-
-        // Skip 88-level condition names
-        if (field.getLevel() == 88) {
-            return;
-        }
-
-        if (shouldFlattenGroup(field)) {
-            node.getChildren().forEach(child -> collectToStringParts(child, parts));
-        } else {
-            String fieldName = fieldNameTracker.getJavaFieldName(field);
-            if (getJavaType(field) instanceof ArrayTypeName) {
-                parts.add(CodeBlock.of("$S + $T.toString($L) +", fieldName + "=", Arrays.class, fieldName));
-            } else {
-                parts.add(CodeBlock.of("$S + $L +", fieldName + "=", fieldName));
-            }
-        }
-    }
-
-    /**
-     * Add equals method.
+     * Add equals method (delegates to ObjectMethodsGenerator).
      */
     protected void addEquals(TypeSpec.Builder builder, String className, List<FieldNode> fieldTree) {
-        MethodSpec.Builder equals = MethodSpec.methodBuilder("equals")
-                .addAnnotation(Override.class)
-                .addModifiers(Modifier.PUBLIC)
-                .returns(boolean.class)
-                .addParameter(Object.class, "o");
-
-        equals.addStatement("if (this == o) return true");
-        equals.addStatement("if (o == null || getClass() != o.getClass()) return false");
-        equals.addStatement("$L that = ($L) o", className, className);
-
-        List<String> fieldNames = new ArrayList<>();
-        fieldTree.forEach(node -> collectFieldNames(node, fieldNames));
-
-        if (fieldNames.isEmpty()) {
-            equals.addStatement("return true");
-        } else {
-            List<CodeBlock> comparisons = fieldNames.stream()
-                    .map(name -> createComparison(name, fieldTree))
-                    .toList();
-
-            CodeBlock joined = comparisons.stream()
-                    .reduce((a, b) -> CodeBlock.of("$L &&\n $L", a, b))
-                    .orElse(CodeBlock.of("true"));
-
-            equals.addStatement("return $L", joined);
-        }
-
-        builder.addMethod(equals.build());
-    }
-
-    private CodeBlock createComparison(String fieldName, List<FieldNode> fieldTree) {
-        FieldDefinition fd = findFieldInTree(fieldTree, fieldName);
-        if (fd != null && getJavaType(fd) instanceof ArrayTypeName) {
-            return CodeBlock.of("$T.equals($L, that.$L)", Arrays.class, fieldName, fieldName);
-        }
-        return CodeBlock.of("$T.equals($L, that.$L)", Objects.class, fieldName, fieldName);
+        objectMethodsGenerator.addEquals(builder, className, fieldTree, fieldNameTracker::getJavaFieldName);
     }
 
     /**
-     * Add hashCode method.
+     * Add hashCode method (delegates to ObjectMethodsGenerator).
      */
     protected void addHashCode(TypeSpec.Builder builder, List<FieldNode> fieldTree) {
-        MethodSpec.Builder hashCode = MethodSpec.methodBuilder("hashCode")
-                .addAnnotation(Override.class)
-                .addModifiers(Modifier.PUBLIC)
-                .returns(int.class);
-
-        List<String> allFieldNames = new ArrayList<>();
-        fieldTree.forEach(node -> collectFieldNames(node, allFieldNames));
-
-        if (allFieldNames.isEmpty()) {
-            hashCode.addStatement("return 0");
-        } else {
-            List<String> arrayFields = allFieldNames.stream()
-                    .filter(name -> isArrayField(name, fieldTree))
-                    .toList();
-
-            List<String> normalFields = allFieldNames.stream()
-                    .filter(name -> !isArrayField(name, fieldTree))
-                    .toList();
-
-            if (normalFields.isEmpty()) {
-                hashCode.addStatement("int result = 1");
-            } else {
-                String args = String.join(",\n ", normalFields);
-                hashCode.addStatement("int result = $T.hash($L)", Objects.class, args);
-            }
-
-            arrayFields.forEach(field ->
-                    hashCode.addStatement("result = 31 * result + $T.hashCode($L)", Arrays.class, field));
-
-            hashCode.addStatement("return result");
-        }
-
-        builder.addMethod(hashCode.build());
-    }
-
-    private boolean isArrayField(String fieldName, List<FieldNode> fieldTree) {
-        FieldDefinition fd = findFieldInTree(fieldTree, fieldName);
-        return fd != null && getJavaType(fd) instanceof ArrayTypeName;
-    }
-
-    /**
-     * Collect field names from a node.
-     */
-    private void collectFieldNames(FieldNode node, List<String> names) {
-        FieldDefinition field = node.getField();
-
-        // Skip 88-level condition names
-        if (field.getLevel() == 88) {
-            return;
-        }
-
-        if (shouldFlattenGroup(field)) {
-            node.getChildren().forEach(child -> collectFieldNames(child, names));
-        } else {
-            names.add(fieldNameTracker.getJavaFieldName(field));
-        }
-    }
-
-    /**
-     * Find field in tree.
-     */
-    private FieldDefinition findFieldInTree(List<FieldNode> nodes, String fieldName) {
-        return nodes.stream()
-                .map(node -> findFieldDefinition(node, fieldName))
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
-    }
-
-    /**
-     * Find field definition by name.
-     */
-    private FieldDefinition findFieldDefinition(FieldNode node, String fieldName) {
-        if (fieldNameTracker.getJavaFieldName(node.getField()).equals(fieldName)) {
-            return node.getField();
-        }
-        return node.getChildren().stream()
-                .map(child -> findFieldDefinition(child, fieldName))
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
+        objectMethodsGenerator.addHashCode(builder, fieldTree, fieldNameTracker::getJavaFieldName);
     }
 
     /**

@@ -33,8 +33,8 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.SECONDS)
 @State(Scope.Benchmark)
 @Fork(value = 1, warmups = 1)
-@Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 3)
+@Warmup(iterations = 1, time = 2)
+@Measurement(iterations = 1, time = 3)
 public class CopybookMultiThreadedBenchmark {
 
     private static final Charset CHARSET = Charset.forName("CP1047");

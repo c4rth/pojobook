@@ -28,8 +28,8 @@ import java.util.concurrent.TimeUnit;
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
 @Fork(value = 1, warmups = 1)
-@Warmup(iterations = 3, time = 2)
-@Measurement(iterations = 5, time = 2)
+@Warmup(iterations = 1, time = 2)
+@Measurement(iterations = 1, time = 2)
 public class CopybookDeserializationBenchmark {
 
     private static final Charset CHARSET = Charset.forName("CP1047");
