@@ -89,14 +89,13 @@ public class ObjectMethodsGenerator {
         equals.addStatement("if (o == null || getClass() != o.getClass()) return false");
         equals.addStatement("$L that = ($L) o", className, className);
 
-        List<String> fieldNames = new ArrayList<>();
-        fieldTree.forEach(node -> collectFieldNames(node, fieldNames, fieldNameResolver));
+        List<FieldMeta> fields = collectFieldMetadata(fieldTree, fieldNameResolver);
 
-        if (fieldNames.isEmpty()) {
+        if (fields.isEmpty()) {
             equals.addStatement("return true");
         } else {
-            List<CodeBlock> comparisons = fieldNames.stream()
-                    .map(name -> createComparison(name, fieldTree, fieldNameResolver))
+            List<CodeBlock> comparisons = fields.stream()
+                    .map(this::createComparison)
                     .toList();
 
             CodeBlock joined = comparisons.stream()
@@ -109,12 +108,12 @@ public class ObjectMethodsGenerator {
         builder.addMethod(equals.build());
     }
 
-    private CodeBlock createComparison(String fieldName, List<FieldNode> fieldTree,
-                                       java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
-        FieldDefinition fd = findFieldInTree(fieldTree, fieldName, fieldNameResolver);
-        if (fd != null && getFieldType(fd) instanceof ArrayTypeName) {
+    private CodeBlock createComparison(FieldMeta field) {
+        if (field.array()) {
+            String fieldName = field.name();
             return CodeBlock.of("$T.equals($L, that.$L)", Arrays.class, fieldName, fieldName);
         }
+        String fieldName = field.name();
         return CodeBlock.of("$T.equals($L, that.$L)", Objects.class, fieldName, fieldName);
     }
 
@@ -128,18 +127,19 @@ public class ObjectMethodsGenerator {
                 .addModifiers(Modifier.PUBLIC)
                 .returns(int.class);
 
-        List<String> allFieldNames = new ArrayList<>();
-        fieldTree.forEach(node -> collectFieldNames(node, allFieldNames, fieldNameResolver));
+        List<FieldMeta> allFields = collectFieldMetadata(fieldTree, fieldNameResolver);
 
-        if (allFieldNames.isEmpty()) {
+        if (allFields.isEmpty()) {
             hashCode.addStatement("return 0");
         } else {
-            List<String> arrayFields = allFieldNames.stream()
-                    .filter(name -> isArrayField(name, fieldTree, fieldNameResolver))
+            List<String> arrayFields = allFields.stream()
+                    .filter(FieldMeta::array)
+                    .map(FieldMeta::name)
                     .toList();
 
-            List<String> normalFields = allFieldNames.stream()
-                    .filter(name -> !isArrayField(name, fieldTree, fieldNameResolver))
+            List<String> normalFields = allFields.stream()
+                    .filter(meta -> !meta.array())
+                    .map(FieldMeta::name)
                     .toList();
 
             if (normalFields.isEmpty()) {
@@ -158,8 +158,15 @@ public class ObjectMethodsGenerator {
         builder.addMethod(hashCode.build());
     }
 
-    private void collectFieldNames(FieldNode node, List<String> names,
-                                   java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
+    private List<FieldMeta> collectFieldMetadata(List<FieldNode> fieldTree,
+                                                 java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
+        List<FieldMeta> fields = new ArrayList<>();
+        fieldTree.forEach(node -> collectFieldMetadata(node, fields, fieldNameResolver));
+        return fields;
+    }
+
+    private void collectFieldMetadata(FieldNode node, List<FieldMeta> fields,
+                                      java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
         FieldDefinition field = node.getField();
 
         // Skip 88-level condition names
@@ -168,37 +175,13 @@ public class ObjectMethodsGenerator {
         }
 
         if (shouldFlattenGroup(field)) {
-            node.getChildren().forEach(child -> collectFieldNames(child, names, fieldNameResolver));
+            node.getChildren().forEach(child -> collectFieldMetadata(child, fields, fieldNameResolver));
         } else {
-            names.add(fieldNameResolver.apply(field));
+            fields.add(new FieldMeta(
+                    fieldNameResolver.apply(field),
+                    getFieldType(field) instanceof ArrayTypeName
+            ));
         }
-    }
-
-    private boolean isArrayField(String fieldName, List<FieldNode> fieldTree,
-                                 java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
-        FieldDefinition fd = findFieldInTree(fieldTree, fieldName, fieldNameResolver);
-        return fd != null && getFieldType(fd) instanceof ArrayTypeName;
-    }
-
-    private FieldDefinition findFieldInTree(List<FieldNode> nodes, String fieldName,
-                                           java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
-        return nodes.stream()
-                .map(node -> findFieldDefinition(node, fieldName, fieldNameResolver))
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
-    }
-
-    private FieldDefinition findFieldDefinition(FieldNode node, String fieldName,
-                                               java.util.function.Function<FieldDefinition, String> fieldNameResolver) {
-        if (fieldNameResolver.apply(node.getField()).equals(fieldName)) {
-            return node.getField();
-        }
-        return node.getChildren().stream()
-                .map(child -> findFieldDefinition(child, fieldName, fieldNameResolver))
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
     }
 
     private TypeName getFieldType(FieldDefinition field) {
@@ -208,6 +191,9 @@ public class ObjectMethodsGenerator {
 
     private boolean shouldFlattenGroup(FieldDefinition field) {
         return field.isGroup() && field.getOccurs() == 1;
+    }
+
+    private record FieldMeta(String name, boolean array) {
     }
 }
 
