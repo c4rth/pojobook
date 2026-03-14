@@ -188,6 +188,16 @@ public final class DisplayNumericUtil {
     }
 
     private static String padWithZeros(String value, int length) {
-        return String.format("%0" + length + "d", new BigInteger(value));
+        int padding = length - value.length();
+        if (padding <= 0) {
+            return value;
+        }
+        char[] result = new char[length];
+        int i = 0;
+        for (; i < padding; i++) {
+            result[i] = '0';
+        }
+        value.getChars(0, value.length(), result, i);
+        return new String(result);
     }
 }

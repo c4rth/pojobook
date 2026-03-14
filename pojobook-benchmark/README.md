@@ -20,9 +20,9 @@ _Comprehensive JMH Benchmark for full round-trip (serialization + deserializatio
 _This represents real-world usage where data is read, processed, and written._
 
 Benchmark                                                Mode  Cnt     Score   Error  Units
-CopybookRoundTripBenchmark.benchmarkAnnotationRoundTrip  avgt       1562.844          ns/op
-CopybookRoundTripBenchmark.benchmarkEmbeddedRoundTrip    avgt        462.172          ns/op
-CopybookRoundTripBenchmark.benchmarkJRecordRoundTrip     avgt       2212.013          ns/op
+CopybookRoundTripBenchmark.benchmarkAnnotationRoundTrip  avgt       1531.276          ns/op
+CopybookRoundTripBenchmark.benchmarkEmbeddedRoundTrip    avgt        459.192          ns/op
+CopybookRoundTripBenchmark.benchmarkJRecordRoundTrip     avgt       2231.985          ns/op
 
 ## CopybookMultiThreadedBenchmark
 
