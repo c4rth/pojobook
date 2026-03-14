@@ -225,18 +225,9 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
      * Generate nested classes.
      */
     private Map<String, TypeSpec> generateNestedClasses(List<FieldNode> nodes) {
-        return nodes.stream()
-                .reduce(
-                        new HashMap<>(),
-                        (map, node) -> {
-                            generateNestedClasses(node, map);
-                            return map;
-                        },
-                        (map1, map2) -> {
-                            map1.putAll(map2);
-                            return map1;
-                        }
-                );
+        Map<String, TypeSpec> nestedClasses = new HashMap<>();
+        nodes.forEach(node -> generateNestedClasses(node, nestedClasses));
+        return nestedClasses;
     }
 
 }
