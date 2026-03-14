@@ -64,6 +64,15 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
     }
 
     /**
+     * Enable primitive numeric field generation for non-nullable numerics.
+     * Default is false to preserve existing generated API compatibility.
+     */
+    public EmbeddedSerializationPojoGenerator withPrimitiveNumericFields(boolean enabled) {
+        this.typeResolver.withPrimitiveNumericFields(enabled);
+        return this;
+    }
+
+    /**
      * Generate a POJO class from a copybook definition.
      */
     @Override

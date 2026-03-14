@@ -12,6 +12,7 @@ public class GeneratorBuilder {
     private String packageName = "org.pojobook.generated";
     private GeneratorContext context;
     private GeneratorType type = GeneratorType.EMBEDDED;
+    private boolean primitiveNumericFields;
 
     public enum GeneratorType {
         EMBEDDED,
@@ -47,6 +48,14 @@ public class GeneratorBuilder {
     }
 
     /**
+     * Enable primitive numeric field generation for embedded generator output.
+     */
+    public GeneratorBuilder withPrimitiveNumericFields(boolean primitiveNumericFields) {
+        this.primitiveNumericFields = primitiveNumericFields;
+        return this;
+    }
+
+    /**
      * Build the configured generator.
      */
     public Object build() {
@@ -61,7 +70,8 @@ public class GeneratorBuilder {
      */
     public EmbeddedSerializationPojoGenerator buildEmbeddedGenerator() {
         EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator(context);
-        return generator.withPackage(packageName);
+        return generator.withPackage(packageName)
+                .withPrimitiveNumericFields(primitiveNumericFields);
     }
 
     /**

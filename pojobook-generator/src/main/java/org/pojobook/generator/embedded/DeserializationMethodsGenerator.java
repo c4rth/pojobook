@@ -195,10 +195,10 @@ public class DeserializationMethodsGenerator {
     private void addSignedNumericDeserialization(MethodSpec.Builder method, FieldDefinition field,
                                                   String targetRef, String dataRef, String offsetExpr,
                                                   TypeName javaType, int length, int decimalDigits) {
-        if (javaType.equals(ClassName.get(Integer.class))) {
+        if (isIntegerType(javaType)) {
             method.addStatement("$L = $T.deserializeDisplaySignedInteger($L, $L, $L, charset)",
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-        } else if (javaType.equals(ClassName.get(Long.class))) {
+        } else if (isLongType(javaType)) {
             method.addStatement("$L = $T.deserializeDisplaySignedLong($L, $L, $L, charset)",
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
         } else if (javaType.equals(ClassName.get(BigDecimal.class))) {
@@ -207,7 +207,7 @@ public class DeserializationMethodsGenerator {
         } else if (javaType.equals(ClassName.get(BigInteger.class))) {
             method.addStatement("$L = $T.deserializeDisplaySignedBigInteger($L, $L, $L, charset)",
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-        } else if (javaType.equals(ClassName.get(Short.class))) {
+        } else if (isShortType(javaType)) {
             method.addStatement("$L = (short) $T.deserializeDisplaySignedInteger($L, $L, $L, charset).intValue()",
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
         }
@@ -216,7 +216,7 @@ public class DeserializationMethodsGenerator {
     private void addUnsignedNumericDeserialization(MethodSpec.Builder method, FieldDefinition field,
                                                     String targetRef, String dataRef, String offsetExpr,
                                                     TypeName javaType, int length, int decimalDigits) {
-        if (javaType.equals(ClassName.get(Integer.class))) {
+        if (isIntegerType(javaType)) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayIntegerWithDecimal($L, $L, $L, charset, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
@@ -224,7 +224,7 @@ public class DeserializationMethodsGenerator {
                 method.addStatement("$L = $T.deserializeDisplayInteger($L, $L, $L, charset)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
             }
-        } else if (javaType.equals(ClassName.get(Long.class))) {
+        } else if (isLongType(javaType)) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayLongWithDecimal($L, $L, $L, charset, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
@@ -232,7 +232,7 @@ public class DeserializationMethodsGenerator {
                 method.addStatement("$L = $T.deserializeDisplayLong($L, $L, $L, charset)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
             }
-        } else if (javaType.equals(ClassName.get(Short.class))) {
+        } else if (isShortType(javaType)) {
             method.addStatement("$L = $T.deserializeDisplayShort($L, $L, $L, charset)",
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
         } else if (javaType.equals(ClassName.get(BigDecimal.class))) {
@@ -264,13 +264,13 @@ public class DeserializationMethodsGenerator {
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits, field.getDecimalDigits());
         } else {
             TypeName fieldType = getBaseJavaType(field);
-            if (fieldType.equals(ClassName.get(Integer.class))) {
+            if (isIntegerType(fieldType)) {
                 method.addStatement("$L = $T.deserializeCompInteger($L, $L, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-            } else if (fieldType.equals(ClassName.get(Long.class))) {
+            } else if (isLongType(fieldType)) {
                 method.addStatement("$L = $T.deserializeCompLong($L, $L, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-            } else if (fieldType.equals(ClassName.get(Short.class))) {
+            } else if (isShortType(fieldType)) {
                 method.addStatement("$L = $T.deserializeCompShort($L, $L, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
             } else {
@@ -302,13 +302,13 @@ public class DeserializationMethodsGenerator {
                     targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits, field.getDecimalDigits());
         } else {
             TypeName fieldType = getBaseJavaType(field);
-            if (fieldType.equals(ClassName.get(Integer.class))) {
+            if (isIntegerType(fieldType)) {
                 method.addStatement("$L = $T.deserializeComp3Integer($L, $L, $L, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits);
-            } else if (fieldType.equals(ClassName.get(Long.class))) {
+            } else if (isLongType(fieldType)) {
                 method.addStatement("$L = $T.deserializeComp3Long($L, $L, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-            } else if (fieldType.equals(ClassName.get(Short.class))) {
+            } else if (isShortType(fieldType)) {
                 method.addStatement("$L = $T.deserializeComp3Short($L, $L, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
             } else {
@@ -328,6 +328,18 @@ public class DeserializationMethodsGenerator {
     private TypeName getBaseJavaType(FieldDefinition field) {
         // Delegate to parent generator which has all the proper type resolution logic
         return parentGenerator.getBaseJavaType(field);
+    }
+
+    private boolean isIntegerType(TypeName typeName) {
+        return typeName.equals(ClassName.get(Integer.class)) || typeName.equals(TypeName.INT);
+    }
+
+    private boolean isLongType(TypeName typeName) {
+        return typeName.equals(ClassName.get(Long.class)) || typeName.equals(TypeName.LONG);
+    }
+
+    private boolean isShortType(TypeName typeName) {
+        return typeName.equals(ClassName.get(Short.class)) || typeName.equals(TypeName.SHORT);
     }
 }
 

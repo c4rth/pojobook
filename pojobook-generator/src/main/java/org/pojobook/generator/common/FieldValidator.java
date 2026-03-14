@@ -43,6 +43,12 @@ public class FieldValidator {
 
     private void addSimpleValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
                                                   String fieldName, String javaType, ClassName utilClass) {
+        // Primitive array length validation (FieldLengthUtil array helpers expect Object[] wrappers)
+        if (isPrimitiveArrayType(javaType) && field.getOccurs() > 1) {
+            addPrimitiveArrayLengthValidation(setter, field, fieldName);
+            return;
+        }
+
         // String validation
         if (javaType.equals("java.lang.String") && field.getIntegerDigits() > 0) {
             setter.addStatement("this.$L = $T.checkStringLength($L, $L, $S)",
@@ -63,13 +69,13 @@ public class FieldValidator {
             if (javaType.contains("BigInteger")) {
                 setter.addStatement("this.$L = $T.checkBigIntegerRange($L, $L, $S)",
                         fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            } else if (javaType.contains("Integer")) {
+            } else if (javaType.contains("Integer") || javaType.equals("int")) {
                 setter.addStatement("this.$L = $T.checkIntegerRange($L, $L, $S)",
                         fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            } else if (javaType.contains("Long")) {
+            } else if (javaType.contains("Long") || javaType.equals("long")) {
                 setter.addStatement("this.$L = $T.checkLongRange($L, $L, $S)",
                         fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-            } else if (javaType.contains("Short")) {
+            } else if (javaType.contains("Short") || javaType.equals("short")) {
                 setter.addStatement("this.$L = $T.checkShortRange($L, $L, $S)",
                         fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
             }
@@ -83,13 +89,13 @@ public class FieldValidator {
                 if (baseType.contains("BigInteger")) {
                     setter.addStatement("this.$L = $T.checkBigIntegerArrayRange($L, $L, $S)",
                             fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                } else if (baseType.contains("Integer")) {
+                } else if (baseType.contains("Integer") || baseType.equals("int")) {
                     setter.addStatement("this.$L = $T.checkIntegerArrayRange($L, $L, $S)",
                             fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                } else if (baseType.contains("Long")) {
+                } else if (baseType.contains("Long") || baseType.equals("long")) {
                     setter.addStatement("this.$L = $T.checkLongArrayRange($L, $L, $S)",
                             fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
-                } else if (baseType.contains("Short")) {
+                } else if (baseType.contains("Short") || baseType.equals("short")) {
                     setter.addStatement("this.$L = $T.checkShortArrayRange($L, $L, $S)",
                             fieldName, utilClass, fieldName, field.getIntegerDigits(), field.getName());
                 }
@@ -154,7 +160,41 @@ public class FieldValidator {
     }
 
     private boolean isNumericType(String javaType) {
-        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*");
+        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*")
+                || javaType.equals("int")
+                || javaType.equals("long")
+                || javaType.equals("short")
+                || javaType.equals("float")
+                || javaType.equals("double")
+                || javaType.equals("int[]")
+                || javaType.equals("long[]")
+                || javaType.equals("short[]")
+                || javaType.equals("float[]")
+                || javaType.equals("double[]");
+    }
+
+    private boolean isPrimitiveArrayType(String javaType) {
+        return javaType.equals("int[]")
+                || javaType.equals("long[]")
+                || javaType.equals("short[]")
+                || javaType.equals("float[]")
+                || javaType.equals("double[]");
+    }
+
+    private void addPrimitiveArrayLengthValidation(MethodSpec.Builder setter, FieldDefinition field, String fieldName) {
+        setter.beginControlFlow("if ($L == null)", fieldName)
+                .addStatement("this.$L = null", fieldName)
+                .nextControlFlow("else if ($L.length != $L)", fieldName, field.getOccurs())
+                .addStatement("throw new $T($S + $L.length + $S + $L + $S)",
+                        IllegalArgumentException.class,
+                        field.getName() + " array length mismatch: expected ",
+                        fieldName,
+                        ", got ",
+                        field.getOccurs(),
+                        "")
+                .nextControlFlow("else")
+                .addStatement("this.$L = $L", fieldName, fieldName)
+                .endControlFlow();
     }
 }
 

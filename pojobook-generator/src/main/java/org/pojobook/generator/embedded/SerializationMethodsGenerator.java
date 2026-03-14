@@ -252,13 +252,13 @@ public class SerializationMethodsGenerator {
                 && "LEADING".equalsIgnoreCase(field.getSignPosition());
 
         if (signed && signSeparate) {
-            method.addStatement("$T.serializeDisplayWithSeparateSignDirect($L, $L, (Number) $L, $L, $L, $L, charset)",
+            method.addStatement("$T.serializeDisplayWithSeparateSignDirect($L, $L, $L, $L, $L, $L, charset)",
                     CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, decimalDigits, isLeadingSign);
         } else if (signed && !signSeparate && isNumeric) {
-            method.addStatement("$T.serializeDisplayWithEmbeddedSignDirect($L, $L, (Number) $L, $L, $L, charset)",
+            method.addStatement("$T.serializeDisplayWithEmbeddedSignDirect($L, $L, $L, $L, $L, charset)",
                     CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, decimalDigits);
         } else if (!signed && decimalDigits > 0 && isNumeric) {
-            method.addStatement("$T.serializeDisplayWithImpliedDecimalDirect($L, $L, (Number) $L, $L, $L, charset)",
+            method.addStatement("$T.serializeDisplayWithImpliedDecimalDirect($L, $L, $L, $L, $L, charset)",
                     CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, decimalDigits);
         } else {
             method.addStatement("$T.serializeDisplayStringDirect($L, $L, $L, $L, $L, charset)",

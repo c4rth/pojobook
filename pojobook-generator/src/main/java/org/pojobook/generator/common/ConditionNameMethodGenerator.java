@@ -30,10 +30,11 @@ public class ConditionNameMethodGenerator {
 
         TypeName fieldType = typeResolver.getBaseJavaType(field);
         boolean isNumeric = isNumericType(fieldType.toString());
+        boolean isPrimitive = fieldType.isPrimitive();
 
         for (ConditionName condition : field.getConditionNames()) {
             String methodName = createMethodName(field, condition);
-            MethodSpec method = createConditionMethod(methodName, fieldName, condition, isNumeric);
+            MethodSpec method = createConditionMethod(methodName, fieldName, condition, isNumeric, isPrimitive);
             builder.addMethod(method);
         }
     }
@@ -48,8 +49,9 @@ public class ConditionNameMethodGenerator {
                 + Character.toUpperCase(conditionNameCamel.charAt(0)) + conditionNameCamel.substring(1);
     }
 
-    private MethodSpec createConditionMethod(String methodName, String fieldName, 
-                                             ConditionName condition, boolean isNumeric) {
+    private MethodSpec createConditionMethod(String methodName, String fieldName,
+                                             ConditionName condition, boolean isNumeric,
+                                             boolean isPrimitive) {
         MethodSpec.Builder method = MethodSpec.methodBuilder(methodName)
                 .addModifiers(Modifier.PUBLIC)
                 .returns(boolean.class)
@@ -59,36 +61,50 @@ public class ConditionNameMethodGenerator {
                         String.join(", ", condition.getValues()));
 
         if (condition.getValues().length == 1) {
-            addSingleValueComparison(method, fieldName, condition.getValues()[0], isNumeric);
+            addSingleValueComparison(method, fieldName, condition.getValues()[0], isNumeric, isPrimitive);
         } else {
-            addMultiValueComparison(method, fieldName, condition.getValues(), isNumeric);
+            addMultiValueComparison(method, fieldName, condition.getValues(), isNumeric, isPrimitive);
         }
 
         return method.build();
     }
 
-    private void addSingleValueComparison(MethodSpec.Builder method, String fieldName, 
-                                         String value, boolean isNumeric) {
+    private void addSingleValueComparison(MethodSpec.Builder method, String fieldName,
+                                          String value, boolean isNumeric, boolean isPrimitive) {
         if (isNumeric) {
             try {
                 Integer.parseInt(value.trim());
-                method.addStatement("return $L != null && $L.equals($L)",
-                        fieldName, fieldName, value.trim());
+                if (isPrimitive) {
+                    method.addStatement("return $L == $L", fieldName, value.trim());
+                } else {
+                    method.addStatement("return $L != null && $L.equals($L)",
+                            fieldName, fieldName, value.trim());
+                }
             } catch (NumberFormatException e) {
+                if (isPrimitive) {
+                    method.addStatement("return false");
+                } else {
+                    method.addStatement("return $L != null && $L.equals($S)",
+                            fieldName, fieldName, value);
+                }
+            }
+        } else {
+            if (isPrimitive) {
+                method.addStatement("return false");
+            } else {
                 method.addStatement("return $L != null && $L.equals($S)",
                         fieldName, fieldName, value);
             }
-        } else {
-            method.addStatement("return $L != null && $L.equals($S)",
-                    fieldName, fieldName, value);
         }
     }
 
     private void addMultiValueComparison(MethodSpec.Builder method, String fieldName,
-                                        String[] values, boolean isNumeric) {
-        method.beginControlFlow("if ($L == null)", fieldName)
-                .addStatement("return false")
-                .endControlFlow();
+                                        String[] values, boolean isNumeric, boolean isPrimitive) {
+        if (!isPrimitive) {
+            method.beginControlFlow("if ($L == null)", fieldName)
+                    .addStatement("return false")
+                    .endControlFlow();
+        }
 
         CodeBlock.Builder codeBlock = CodeBlock.builder().add("return ");
 
@@ -99,12 +115,24 @@ public class ConditionNameMethodGenerator {
             if (isNumeric) {
                 try {
                     Integer.parseInt(values[i].trim());
-                    codeBlock.add("$L.equals($L)", fieldName, values[i].trim());
+                    if (isPrimitive) {
+                        codeBlock.add("$L == $L", fieldName, values[i].trim());
+                    } else {
+                        codeBlock.add("$L.equals($L)", fieldName, values[i].trim());
+                    }
                 } catch (NumberFormatException e) {
-                    codeBlock.add("$L.equals($S)", fieldName, values[i]);
+                    if (isPrimitive) {
+                        codeBlock.add("false");
+                    } else {
+                        codeBlock.add("$L.equals($S)", fieldName, values[i]);
+                    }
                 }
             } else {
-                codeBlock.add("$L.equals($S)", fieldName, values[i]);
+                if (isPrimitive) {
+                    codeBlock.add("false");
+                } else {
+                    codeBlock.add("$L.equals($S)", fieldName, values[i]);
+                }
             }
         }
 
@@ -112,7 +140,12 @@ public class ConditionNameMethodGenerator {
     }
 
     private boolean isNumericType(String javaType) {
-        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*");
+        return javaType.matches(".*(Integer|Long|Short|BigInteger|BigDecimal).*")
+                || javaType.equals("int")
+                || javaType.equals("long")
+                || javaType.equals("short")
+                || javaType.equals("float")
+                || javaType.equals("double");
     }
 }
 

@@ -206,5 +206,42 @@ class EmbeddedSerializationPojoGeneratorTest {
         log.info("=== Generated POJO for Customer Record ===");
         log.info(generatedCode);
     }
+
+    @Test
+    void testPrimitiveNumericFieldMode() throws ParseException {
+        String copybook = """
+                   01  METRICS-RECORD.
+                       05  COUNTER             PIC 9(5).
+                       05  TOTAL               PIC 9(12).
+                       05  RATE                PIC S9(4)V99 COMP-3.
+                       05  BINARY-SHORT        PIC 9(4) COMP.
+                """;
+
+        CopybookParser parser = new CopybookParser();
+        CopybookDefinition definition = parser.parse(copybook);
+        definition.setRecordName("METRICS-RECORD");
+
+        EmbeddedSerializationPojoGenerator primitiveGenerator = new EmbeddedSerializationPojoGenerator()
+                .withPackage("com.example.generated")
+                .withPrimitiveNumericFields(true);
+
+        String primitiveCode = primitiveGenerator.generate(definition);
+
+        assertTrue(primitiveCode.contains("private int counter = 0;"));
+        assertTrue(primitiveCode.contains("private long total = 0L;"));
+        assertTrue(primitiveCode.contains("private short binaryShort = (short) 0;"));
+        assertTrue(primitiveCode.contains("public int getCounter()"));
+        assertTrue(primitiveCode.contains("public void setCounter(int counter)"));
+        assertTrue(primitiveCode.contains("counter = CobolFieldDeserializer.deserializeDisplayInteger("));
+
+        EmbeddedSerializationPojoGenerator defaultGenerator = new EmbeddedSerializationPojoGenerator()
+                .withPackage("com.example.generated");
+
+        String defaultCode = defaultGenerator.generate(definition);
+
+        assertTrue(defaultCode.contains("private Integer counter = 0;"));
+        assertTrue(defaultCode.contains("private Long total = 0L;"));
+        assertTrue(defaultCode.contains("private Short binaryShort = (short) 0;"));
+    }
 }
 

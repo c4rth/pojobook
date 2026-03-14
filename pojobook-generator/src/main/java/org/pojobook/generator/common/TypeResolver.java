@@ -12,6 +12,17 @@ import java.math.BigInteger;
  */
 public class TypeResolver {
 
+    private boolean primitiveNumericFields;
+
+    public TypeResolver() {
+        this.primitiveNumericFields = false;
+    }
+
+    public TypeResolver withPrimitiveNumericFields(boolean enabled) {
+        this.primitiveNumericFields = enabled;
+        return this;
+    }
+
     /**
      * Get base Java type for a field (non-array).
      */
@@ -19,8 +30,8 @@ public class TypeResolver {
         return switch (field.getType()) {
             case DISPLAY -> getDisplayType(field);
             case COMP, COMP_5 -> getCompType(field);
-            case COMP_1 -> ClassName.get(Float.class);
-            case COMP_2 -> ClassName.get(Double.class);
+            case COMP_1 -> primitiveNumericFields ? TypeName.FLOAT : ClassName.get(Float.class);
+            case COMP_2 -> primitiveNumericFields ? TypeName.DOUBLE : ClassName.get(Double.class);
             case COMP_3, PACKED_DECIMAL -> getPackedDecimalType(field);
             case ZONED_DECIMAL -> ClassName.get(BigDecimal.class);
         };
@@ -45,9 +56,9 @@ public class TypeResolver {
 
     private TypeName getCompType(FieldDefinition field) {
         int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
-        if (totalDigits <= 4) return ClassName.get(Short.class);
-        if (totalDigits <= 9) return ClassName.get(Integer.class);
-        return ClassName.get(Long.class);
+        if (totalDigits <= 4) return primitiveNumericFields ? TypeName.SHORT : ClassName.get(Short.class);
+        if (totalDigits <= 9) return primitiveNumericFields ? TypeName.INT : ClassName.get(Integer.class);
+        return primitiveNumericFields ? TypeName.LONG : ClassName.get(Long.class);
     }
 
     private TypeName getPackedDecimalType(FieldDefinition field) {
@@ -57,8 +68,8 @@ public class TypeResolver {
     }
 
     private TypeName getIntegerType(int digits) {
-        if (digits <= 9) return ClassName.get(Integer.class);
-        if (digits <= 18) return ClassName.get(Long.class);
+        if (digits <= 9) return primitiveNumericFields ? TypeName.INT : ClassName.get(Integer.class);
+        if (digits <= 18) return primitiveNumericFields ? TypeName.LONG : ClassName.get(Long.class);
         return ClassName.get(BigInteger.class);
     }
 
@@ -71,6 +82,11 @@ public class TypeResolver {
         }
 
         return switch (baseType.toString()) {
+            case "int" -> "0";
+            case "long" -> "0L";
+            case "short" -> "(short) 0";
+            case "float" -> "0.0f";
+            case "double" -> "0.0";
             case "java.lang.String" -> "\"\"";
             case "java.lang.Integer" -> "0";
             case "java.lang.Long" -> "0L";
