@@ -13,7 +13,9 @@ import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Test for SIGN LEADING SEPARATE and SIGN TRAILING SEPARATE functionality.

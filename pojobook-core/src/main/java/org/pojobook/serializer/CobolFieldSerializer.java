@@ -115,7 +115,7 @@ public class CobolFieldSerializer {
      * Serialize COMP-3 (packed decimal) field.
      */
     public static byte[] serializeComp3(Object value, int totalDigits, int decimalDigits) {
-        BigDecimal bdValue = value != null ? new BigDecimal(value.toString()) : BigDecimal.ZERO;
+        BigDecimal bdValue = value != null ? objectToBigDecimal(value) : BigDecimal.ZERO;
 
         if (decimalDigits > 0) {
             bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
@@ -145,7 +145,7 @@ public class CobolFieldSerializer {
      * Serialize ZONED-DECIMAL field.
      */
     public static byte[] serializeZonedDecimal(Object value, int totalDigits, int decimalDigits, boolean signed) {
-        BigDecimal bdValue = value != null ? new BigDecimal(value.toString()) : BigDecimal.ZERO;
+        BigDecimal bdValue = value != null ? objectToBigDecimal(value) : BigDecimal.ZERO;
 
         if (decimalDigits > 0) {
             bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
@@ -171,6 +171,26 @@ public class CobolFieldSerializer {
 
     private static BigDecimal toBigDecimal(Number value) {
         return value instanceof BigDecimal bd ? bd : new BigDecimal(value.toString());
+    }
+
+    /**
+     * Convert an Object value to BigDecimal, avoiding the toString() roundtrip
+     * when the value is already a BigDecimal or a primitive-wrapper Number.
+     */
+    private static BigDecimal objectToBigDecimal(Object value) {
+        if (value instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (value instanceof Long l) {
+            return BigDecimal.valueOf(l);
+        }
+        if (value instanceof Integer i) {
+            return BigDecimal.valueOf(i);
+        }
+        if (value instanceof Short s) {
+            return BigDecimal.valueOf(s);
+        }
+        return new BigDecimal(value.toString());
     }
 
     private static String formatUnscaledValueForDigits(BigDecimal absValue, int totalDigits) {
@@ -387,12 +407,32 @@ public class CobolFieldSerializer {
      * Serialize COMP-3 (packed decimal) field directly to buffer.
      */
     public static void serializeComp3Direct(byte[] buffer, int offset, Object value, int totalDigits, int decimalDigits) {
-        BigDecimal bdValue = value != null ? new BigDecimal(value.toString()) : BigDecimal.ZERO;
+        BigDecimal bdValue = value != null ? objectToBigDecimal(value) : BigDecimal.ZERO;
 
         if (decimalDigits > 0) {
             bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
         }
 
+        packComp3IntoBuffer(buffer, offset, bdValue, totalDigits);
+    }
+
+    /**
+     * Serialize COMP-3 (packed decimal) field directly to buffer using a pre-computed scale factor.
+     * This avoids recomputing {@code BigDecimal.TEN.pow(decimalDigits)} on every call.
+     *
+     * @param scaleFactor pre-computed {@code BigDecimal.TEN.pow(decimalDigits)}, or {@code null} if no scaling is needed
+     */
+    public static void serializeComp3Direct(byte[] buffer, int offset, Object value, int totalDigits, BigDecimal scaleFactor) {
+        BigDecimal bdValue = value != null ? objectToBigDecimal(value) : BigDecimal.ZERO;
+
+        if (scaleFactor != null) {
+            bdValue = bdValue.multiply(scaleFactor);
+        }
+
+        packComp3IntoBuffer(buffer, offset, bdValue, totalDigits);
+    }
+
+    private static void packComp3IntoBuffer(byte[] buffer, int offset, BigDecimal bdValue, int totalDigits) {
         BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
         String digits = String.format("%0" + totalDigits + "d", biValue.abs().longValue());
 
@@ -414,13 +454,35 @@ public class CobolFieldSerializer {
      * Serialize ZONED-DECIMAL field directly to buffer.
      */
     public static void serializeZonedDecimalDirect(byte[] buffer, int offset, Object value,
-                                                   int totalDigits, int decimalDigits, boolean signed) {
-        BigDecimal bdValue = value != null ? new BigDecimal(value.toString()) : BigDecimal.ZERO;
+                                                    int totalDigits, int decimalDigits, boolean signed) {
+        BigDecimal bdValue = value != null ? objectToBigDecimal(value) : BigDecimal.ZERO;
 
         if (decimalDigits > 0) {
             bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
         }
 
+        writeZonedDecimalToBuffer(buffer, offset, bdValue, totalDigits, signed);
+    }
+
+    /**
+     * Serialize ZONED-DECIMAL field directly to buffer using a pre-computed scale factor.
+     * This avoids recomputing {@code BigDecimal.TEN.pow(decimalDigits)} on every call.
+     *
+     * @param scaleFactor pre-computed {@code BigDecimal.TEN.pow(decimalDigits)}, or {@code null} if no scaling is needed
+     */
+    public static void serializeZonedDecimalDirect(byte[] buffer, int offset, Object value,
+                                                    int totalDigits, BigDecimal scaleFactor, boolean signed) {
+        BigDecimal bdValue = value != null ? objectToBigDecimal(value) : BigDecimal.ZERO;
+
+        if (scaleFactor != null) {
+            bdValue = bdValue.multiply(scaleFactor);
+        }
+
+        writeZonedDecimalToBuffer(buffer, offset, bdValue, totalDigits, signed);
+    }
+
+    private static void writeZonedDecimalToBuffer(byte[] buffer, int offset, BigDecimal bdValue,
+                                                   int totalDigits, boolean signed) {
         long longValue = bdValue.setScale(0, RoundingMode.HALF_UP).longValue();
         String digits = String.format("%0" + totalDigits + "d", Math.abs(longValue));
 

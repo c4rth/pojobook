@@ -16,6 +16,7 @@ import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.FieldDefinition;
 
 import javax.lang.model.element.Modifier;
+import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.List;
@@ -248,6 +249,15 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
                 || field.getType() == CobolDataType.ZONED_DECIMAL) {
             builder.addField(FieldSpec.builder(int.class, "TOTAL_DIGITS_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
                     .initializer("$L", field.getIntegerDigits() + field.getDecimalDigits())
+                    .build());
+        }
+
+        if ((field.getType() == CobolDataType.COMP_3
+                || field.getType() == CobolDataType.PACKED_DECIMAL
+                || field.getType() == CobolDataType.ZONED_DECIMAL)
+                && field.getDecimalDigits() > 0) {
+            builder.addField(FieldSpec.builder(BigDecimal.class, "SCALE_FACTOR_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$T.TEN.pow($L)", BigDecimal.class, field.getDecimalDigits())
                     .build());
         }
 

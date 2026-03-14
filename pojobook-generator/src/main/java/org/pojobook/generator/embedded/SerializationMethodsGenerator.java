@@ -247,21 +247,33 @@ public class SerializationMethodsGenerator {
     }
 
     private void addComp3Serialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
-                                       String valueRef, String offsetExpr, String bufferName) {
+                                        String valueRef, String offsetExpr, String bufferName) {
         String totalDigitsConstant = totalDigitsConstantName(fieldName);
-        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
-        method.addStatement("$T.serializeComp3Direct($L, $L, $L, $L, $L)",
-                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, decimalDigitsConstant);
+        if (field.getDecimalDigits() > 0) {
+            String scaleFactorConstant = scaleFactorConstantName(fieldName);
+            method.addStatement("$T.serializeComp3Direct($L, $L, $L, $L, $L)",
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, scaleFactorConstant);
+        } else {
+            method.addStatement("$T.serializeComp3Direct($L, $L, $L, $L, $L)",
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, "0");
+        }
     }
 
     private void addZonedDecimalSerialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
-                                              String valueRef, String offsetExpr, String bufferName) {
+                                               String valueRef, String offsetExpr, String bufferName) {
         String totalDigitsConstant = totalDigitsConstantName(fieldName);
-        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
         String signedConstant = signedConstantName(fieldName);
-        method.addStatement("$T.serializeZonedDecimalDirect($L, $L, $L, $L, $L, $L)",
-                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, decimalDigitsConstant,
-                signedConstant);
+        if (field.getDecimalDigits() > 0) {
+            String scaleFactorConstant = scaleFactorConstantName(fieldName);
+            method.addStatement("$T.serializeZonedDecimalDirect($L, $L, $L, $L, $L, $L)",
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, scaleFactorConstant,
+                    signedConstant);
+        } else {
+            String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
+            method.addStatement("$T.serializeZonedDecimalDirect($L, $L, $L, $L, $L, $L)",
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, decimalDigitsConstant,
+                    signedConstant);
+        }
     }
 
     private String lengthConstantName(String fieldName) {
@@ -282,6 +294,10 @@ public class SerializationMethodsGenerator {
 
     private String signedConstantName(String fieldName) {
         return "SIGNED_" + fieldName.toUpperCase();
+    }
+
+    private String scaleFactorConstantName(String fieldName) {
+        return "SCALE_FACTOR_" + fieldName.toUpperCase();
     }
 
     private String leadingSignConstantName(String fieldName) {
