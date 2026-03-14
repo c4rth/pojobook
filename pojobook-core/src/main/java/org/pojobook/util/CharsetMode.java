@@ -2,6 +2,8 @@ package org.pojobook.util;
 
 import java.nio.charset.Charset;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Detects the charset family for optimized byte-level encoding/decoding.
@@ -12,6 +14,9 @@ import java.util.Locale;
  *   <li>{@link #EBCDIC} – EBCDIC charsets (CP1047, CP037, …)</li>
  *   <li>{@link #UNKNOWN} – unsupported / multi-byte charsets</li>
  * </ul>
+ * <p>
+ * Detection results are cached so that repeated calls with the same {@link Charset}
+ * instance avoid the {@code name().toUpperCase()} and {@code contains()} overhead.
  */
 public final class CharsetMode {
 
@@ -30,16 +35,32 @@ public final class CharsetMode {
     public static final byte EBCDIC_SPACE = 0x40;
     public static final byte EBCDIC_ZERO = (byte) 0xF0;
 
+    /** Cache of detection results keyed by Charset instance. */
+    private static final ConcurrentMap<Charset, Integer> CACHE = new ConcurrentHashMap<>();
+
     private CharsetMode() {
         // Prevent instantiation
     }
 
     /**
      * Detect the charset family from a {@link Charset} instance.
+     * <p>
+     * The result is cached per {@link Charset} instance so that only the first
+     * call performs string inspection; subsequent calls are a fast map lookup.
      *
      * @return {@link #ASCII}, {@link #EBCDIC}, or {@link #UNKNOWN}
      */
     public static int detect(Charset charset) {
+        Integer cached = CACHE.get(charset);
+        if (cached != null) {
+            return cached;
+        }
+        int mode = detectUncached(charset);
+        CACHE.put(charset, mode);
+        return mode;
+    }
+
+    private static int detectUncached(Charset charset) {
         String charsetName = charset.name().toUpperCase(Locale.ROOT);
         if (charsetName.contains("1047") || charsetName.contains("037") || charsetName.contains("EBCDIC")) {
             return EBCDIC;
