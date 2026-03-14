@@ -132,15 +132,15 @@ public class ObjectMethodsGenerator {
         if (allFields.isEmpty()) {
             hashCode.addStatement("return 0");
         } else {
-            List<String> arrayFields = allFields.stream()
-                    .filter(FieldMeta::array)
-                    .map(FieldMeta::name)
-                    .toList();
-
-            List<String> normalFields = allFields.stream()
-                    .filter(meta -> !meta.array())
-                    .map(FieldMeta::name)
-                    .toList();
+            List<String> arrayFields = new ArrayList<>();
+            List<String> normalFields = new ArrayList<>();
+            for (FieldMeta field : allFields) {
+                if (field.array()) {
+                    arrayFields.add(field.name());
+                } else {
+                    normalFields.add(field.name());
+                }
+            }
 
             if (normalFields.isEmpty()) {
                 hashCode.addStatement("int result = 1");
