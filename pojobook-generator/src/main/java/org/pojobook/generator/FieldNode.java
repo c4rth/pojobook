@@ -14,9 +14,10 @@ public final class FieldNode {
     private final FieldDefinition field;
     private final List<FieldNode> children;
 
-    private FieldNode(FieldDefinition field, List<FieldNode> children) {
+
+    private FieldNode(FieldDefinition field, List<FieldNode> children, boolean copyChildren) {
         this.field = field;
-        this.children = List.copyOf(children);
+        this.children = copyChildren ? List.copyOf(children) : children;
     }
 
     public FieldDefinition getField() {
@@ -36,18 +37,8 @@ public final class FieldNode {
             return List.of();
         }
 
-        // Extract fields belonging to first 01-level record
-        List<FieldDefinition> firstRecordFields = extractFirstRecord(fields);
-
-        // Build tree
-        return buildTreeFromFields(firstRecordFields);
-    }
-
-    /**
-     * Extract fields belonging to first 01-level record.
-     */
-    private static List<FieldDefinition> extractFirstRecord(List<FieldDefinition> fields) {
-        List<FieldDefinition> result = new ArrayList<>();
+        List<MutableNode> roots = new ArrayList<>();
+        Deque<MutableNode> stack = new ArrayDeque<>();
         boolean foundFirst01 = false;
 
         for (FieldDefinition field : fields) {
@@ -57,20 +48,7 @@ public final class FieldNode {
                 }
                 foundFirst01 = true;
             }
-            result.add(field);
-        }
 
-        return result;
-    }
-
-    /**
-     * Build tree using stack-based approach with mutable builders.
-     */
-    private static List<FieldNode> buildTreeFromFields(List<FieldDefinition> fields) {
-        List<MutableNode> roots = new ArrayList<>();
-        Deque<MutableNode> stack = new ArrayDeque<>();
-
-        fields.forEach(field -> {
             // Pop stack to find correct parent level
             popStackUntilParent(stack, field.getLevel());
 
@@ -88,12 +66,14 @@ public final class FieldNode {
             if (field.isGroup()) {
                 stack.addLast(mutableNode);
             }
-        });
+        }
 
         // Convert mutable tree to immutable
-        return roots.stream()
-                .map(MutableNode::toImmutable)
-                .toList();
+        List<FieldNode> immutableRoots = new ArrayList<>(roots.size());
+        for (MutableNode root : roots) {
+            immutableRoots.add(root.toImmutable());
+        }
+        return List.copyOf(immutableRoots);
     }
 
     /**
@@ -122,10 +102,11 @@ public final class FieldNode {
         }
 
         FieldNode toImmutable() {
-            List<FieldNode> immutableChildren = children.stream()
-                    .map(MutableNode::toImmutable)
-                    .toList();
-            return new FieldNode(field, immutableChildren);
+            List<FieldNode> immutableChildren = new ArrayList<>(children.size());
+            for (MutableNode child : children) {
+                immutableChildren.add(child.toImmutable());
+            }
+            return new FieldNode(field, List.copyOf(immutableChildren), false);
         }
     }
 }
