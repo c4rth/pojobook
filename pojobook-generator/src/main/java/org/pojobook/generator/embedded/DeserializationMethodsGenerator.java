@@ -151,13 +151,13 @@ public class DeserializationMethodsGenerator {
                 method.addStatement("int $L = offset + $L", baseOffsetVar, offsetConstant)
                         .addStatement("int $L = $L", posVar, baseOffsetVar);
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
-                addFieldDeserializationCode(method, field, instanceRef + "." + fieldName + "[i]",
+                addFieldDeserializationCode(method, fieldName, field, instanceRef + "." + fieldName + "[i]",
                         "data", posVar);
                 method.addStatement("$L += $L", posVar, sizeConstant);
                 method.endControlFlow();
             } else {
                 // Single field
-                addFieldDeserializationCode(method, field, instanceRef + "." + fieldName,
+                addFieldDeserializationCode(method, fieldName, field, instanceRef + "." + fieldName,
                         "data", "offset + " + offsetConstant);
             }
         }
@@ -166,19 +166,19 @@ public class DeserializationMethodsGenerator {
     /**
      * Add deserialization code for a single field value using pre-computed offset.
      */
-    private void addFieldDeserializationCode(MethodSpec.Builder method, FieldDefinition field,
+    private void addFieldDeserializationCode(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                              String targetRef, String dataRef, String offsetExpr) {
         switch (field.getType()) {
-            case DISPLAY -> addDisplayDeserialization(method, field, targetRef, dataRef, offsetExpr);
-            case COMP, COMP_5 -> addCompDeserialization(method, field, targetRef, dataRef, offsetExpr);
+            case DISPLAY -> addDisplayDeserialization(method, fieldName, field, targetRef, dataRef, offsetExpr);
+            case COMP, COMP_5 -> addCompDeserialization(method, fieldName, field, targetRef, dataRef, offsetExpr);
             case COMP_1 -> addComp1Deserialization(method, targetRef, dataRef, offsetExpr);
             case COMP_2 -> addComp2Deserialization(method, targetRef, dataRef, offsetExpr);
-            case COMP_3, PACKED_DECIMAL -> addComp3Deserialization(method, field, targetRef, dataRef, offsetExpr);
-            case ZONED_DECIMAL -> addZonedDecimalDeserialization(method, field, targetRef, dataRef, offsetExpr);
+            case COMP_3, PACKED_DECIMAL -> addComp3Deserialization(method, fieldName, field, targetRef, dataRef, offsetExpr);
+            case ZONED_DECIMAL -> addZonedDecimalDeserialization(method, fieldName, field, targetRef, dataRef, offsetExpr);
         }
     }
 
-    private void addDisplayDeserialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addDisplayDeserialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                            String targetRef, String dataRef, String offsetExpr) {
         int length = offsetCalculator.calculateFieldSize(field);
         if (length == 0) {
@@ -187,101 +187,109 @@ public class DeserializationMethodsGenerator {
         TypeName javaType = getBaseJavaType(field);
         boolean signed = field.isSigned();
         int decimalDigits = field.getDecimalDigits();
+        String lengthConstant = lengthConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
 
         if (javaType.equals(ClassName.get(String.class))) {
             method.addStatement("$L = $T.deserializeDisplayString($L, $L, $L, charset)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
         } else if (signed) {
-            addSignedNumericDeserialization(method, field, targetRef, dataRef, offsetExpr, javaType, length, decimalDigits);
+            addSignedNumericDeserialization(method, targetRef, dataRef, offsetExpr, javaType, lengthConstant,
+                    decimalDigitsConstant);
         } else {
-            addUnsignedNumericDeserialization(method, field, targetRef, dataRef, offsetExpr, javaType, length, decimalDigits);
+            addUnsignedNumericDeserialization(method, targetRef, dataRef, offsetExpr, javaType, decimalDigits,
+                    lengthConstant, decimalDigitsConstant);
         }
     }
 
-    private void addSignedNumericDeserialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addSignedNumericDeserialization(MethodSpec.Builder method,
                                                   String targetRef, String dataRef, String offsetExpr,
-                                                  TypeName javaType, int length, int decimalDigits) {
+                                                  TypeName javaType, String lengthConstant,
+                                                  String decimalDigitsConstant) {
         if (isIntegerType(javaType)) {
             method.addStatement("$L = $T.deserializeDisplaySignedInteger($L, $L, $L, charset)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
         } else if (isLongType(javaType)) {
             method.addStatement("$L = $T.deserializeDisplaySignedLong($L, $L, $L, charset)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
         } else if (javaType.equals(ClassName.get(BigDecimal.class))) {
             method.addStatement("$L = $T.deserializeDisplaySignedBigDecimal($L, $L, $L, charset, $L)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, decimalDigitsConstant);
         } else if (javaType.equals(ClassName.get(BigInteger.class))) {
             method.addStatement("$L = $T.deserializeDisplaySignedBigInteger($L, $L, $L, charset)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
         } else if (isShortType(javaType)) {
             method.addStatement("$L = (short) $T.deserializeDisplaySignedInteger($L, $L, $L, charset).intValue()",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
         }
     }
 
-    private void addUnsignedNumericDeserialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addUnsignedNumericDeserialization(MethodSpec.Builder method,
                                                     String targetRef, String dataRef, String offsetExpr,
-                                                    TypeName javaType, int length, int decimalDigits) {
+                                                    TypeName javaType, int decimalDigits,
+                                                    String lengthConstant, String decimalDigitsConstant) {
         if (isIntegerType(javaType)) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayIntegerWithDecimal($L, $L, $L, charset, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, decimalDigitsConstant);
             } else {
                 method.addStatement("$L = $T.deserializeDisplayInteger($L, $L, $L, charset)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             }
         } else if (isLongType(javaType)) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayLongWithDecimal($L, $L, $L, charset, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, decimalDigitsConstant);
             } else {
                 method.addStatement("$L = $T.deserializeDisplayLong($L, $L, $L, charset)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             }
         } else if (isShortType(javaType)) {
             method.addStatement("$L = $T.deserializeDisplayShort($L, $L, $L, charset)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
         } else if (javaType.equals(ClassName.get(BigDecimal.class))) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayBigDecimalWithDecimal($L, $L, $L, charset, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, decimalDigitsConstant);
             } else {
                 method.addStatement("$L = $T.deserializeDisplayBigDecimal($L, $L, $L, charset)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             }
         } else if (javaType.equals(ClassName.get(BigInteger.class))) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayBigDecimalWithDecimal($L, $L, $L, charset, $L).toBigInteger()",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, decimalDigitsConstant);
             } else {
                 method.addStatement("$L = $T.deserializeDisplayBigInteger($L, $L, $L, charset)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             }
         }
     }
 
-    private void addCompDeserialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addCompDeserialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                         String targetRef, String dataRef, String offsetExpr) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
-        int length = offsetCalculator.calculateFieldSize(field);
+        String totalDigitsConstant = totalDigitsConstantName(fieldName);
+        String lengthConstant = lengthConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
 
         if (field.getDecimalDigits() > 0) {
             method.addStatement("$L = $T.deserializeCompBigDecimal($L, $L, $L, $L, $L)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits, field.getDecimalDigits());
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, totalDigitsConstant,
+                    decimalDigitsConstant);
         } else {
             TypeName fieldType = getBaseJavaType(field);
             if (isIntegerType(fieldType)) {
                 method.addStatement("$L = $T.deserializeCompInteger($L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             } else if (isLongType(fieldType)) {
                 method.addStatement("$L = $T.deserializeCompLong($L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             } else if (isShortType(fieldType)) {
                 method.addStatement("$L = $T.deserializeCompShort($L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             } else {
                 method.addStatement("$L = $T.deserializeCompBigInteger($L, $L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, totalDigitsConstant);
             }
         }
     }
@@ -298,37 +306,41 @@ public class DeserializationMethodsGenerator {
                 targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr);
     }
 
-    private void addComp3Deserialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addComp3Deserialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                          String targetRef, String dataRef, String offsetExpr) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
-        int length = offsetCalculator.calculateFieldSize(field);
+        String totalDigitsConstant = totalDigitsConstantName(fieldName);
+        String lengthConstant = lengthConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
 
         if (field.getDecimalDigits() > 0) {
             method.addStatement("$L = $T.deserializeComp3BigDecimal($L, $L, $L, $L, $L)",
-                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits, field.getDecimalDigits());
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, totalDigitsConstant,
+                    decimalDigitsConstant);
         } else {
             TypeName fieldType = getBaseJavaType(field);
             if (isIntegerType(fieldType)) {
                 method.addStatement("$L = $T.deserializeComp3Integer($L, $L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, totalDigitsConstant);
             } else if (isLongType(fieldType)) {
                 method.addStatement("$L = $T.deserializeComp3Long($L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             } else if (isShortType(fieldType)) {
                 method.addStatement("$L = $T.deserializeComp3Short($L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant);
             } else {
                 method.addStatement("$L = $T.deserializeComp3BigInteger($L, $L, $L, $L)",
-                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, totalDigits);
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, lengthConstant, totalDigitsConstant);
             }
         }
     }
 
-    private void addZonedDecimalDeserialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addZonedDecimalDeserialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                                 String targetRef, String dataRef, String offsetExpr) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
+        String totalDigitsConstant = totalDigitsConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
         method.addStatement("$L = $T.deserializeZonedDecimalBigDecimal($L, $L, $L, $L, $L)",
-                targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, totalDigits, totalDigits, field.getDecimalDigits());
+                targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, totalDigitsConstant, totalDigitsConstant,
+                decimalDigitsConstant);
     }
 
     private TypeName getBaseJavaType(FieldDefinition field) {
@@ -346,6 +358,18 @@ public class DeserializationMethodsGenerator {
 
     private boolean isShortType(TypeName typeName) {
         return typeName.equals(ClassName.get(Short.class)) || typeName.equals(TypeName.SHORT);
+    }
+
+    private String lengthConstantName(String fieldName) {
+        return "LEN_" + fieldName.toUpperCase();
+    }
+
+    private String decimalDigitsConstantName(String fieldName) {
+        return "DECIMAL_DIGITS_" + fieldName.toUpperCase();
+    }
+
+    private String totalDigitsConstantName(String fieldName) {
+        return "TOTAL_DIGITS_" + fieldName.toUpperCase();
     }
 }
 

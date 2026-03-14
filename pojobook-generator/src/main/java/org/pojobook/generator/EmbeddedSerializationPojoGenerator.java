@@ -6,6 +6,7 @@ import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.JavaFile;
 import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
+import org.pojobook.CobolDataType;
 import org.pojobook.generator.context.GeneratorContext;
 import org.pojobook.generator.embedded.ConstructorGenerator;
 import org.pojobook.generator.embedded.DeserializationMethodsGenerator;
@@ -182,6 +183,7 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
 
         // Delegate to offsetCalculator for offset/size constants
         offsetCalculator.addOffsetFields(context.builder, context.fieldTree);
+        addFieldMetadataConstants(context.builder, context.fieldTree);
     }
 
     /**
@@ -189,6 +191,84 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
      */
     private void addStaticVariablesForNestedClass(BuilderContext context) {
         offsetCalculator.addOffsetFields(context.builder, context.fieldTree);
+        addFieldMetadataConstants(context.builder, context.fieldTree);
+    }
+
+    private void addFieldMetadataConstants(TypeSpec.Builder builder, List<FieldNode> nodes) {
+        nodes.forEach(node -> addFieldMetadataConstants(builder, node));
+    }
+
+    private void addFieldMetadataConstants(TypeSpec.Builder builder, FieldNode node) {
+        FieldDefinition field = node.getField();
+
+        if (field.getLevel() == 88) {
+            return;
+        }
+
+        if (field.isGroup() && field.getOccurs() == 1 && !node.getChildren().isEmpty()) {
+            node.getChildren().forEach(child -> addFieldMetadataConstants(builder, child));
+            return;
+        }
+
+        if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
+            return;
+        }
+
+        String fieldName = fieldNameTracker.toUniqueFieldName(field);
+        String suffix = fieldName.toUpperCase();
+
+        int length = offsetCalculator.calculateFieldSize(field);
+        if (length > 0) {
+            builder.addField(FieldSpec.builder(int.class, "LEN_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$L", length)
+                    .build());
+        }
+
+        if (field.getType() == CobolDataType.DISPLAY) {
+            builder.addField(FieldSpec.builder(boolean.class, "IS_NUMERIC_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$L", isNumericPicture(field))
+                    .build());
+        }
+
+        if (field.getType() == CobolDataType.DISPLAY
+                || field.getType() == CobolDataType.COMP
+                || field.getType() == CobolDataType.COMP_5
+                || field.getType() == CobolDataType.COMP_3
+                || field.getType() == CobolDataType.PACKED_DECIMAL
+                || field.getType() == CobolDataType.ZONED_DECIMAL) {
+            builder.addField(FieldSpec.builder(int.class, "DECIMAL_DIGITS_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$L", field.getDecimalDigits())
+                    .build());
+        }
+
+        if (field.getType() == CobolDataType.COMP
+                || field.getType() == CobolDataType.COMP_5
+                || field.getType() == CobolDataType.COMP_3
+                || field.getType() == CobolDataType.PACKED_DECIMAL
+                || field.getType() == CobolDataType.ZONED_DECIMAL) {
+            builder.addField(FieldSpec.builder(int.class, "TOTAL_DIGITS_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$L", field.getIntegerDigits() + field.getDecimalDigits())
+                    .build());
+        }
+
+        if (field.getType() == CobolDataType.ZONED_DECIMAL) {
+            builder.addField(FieldSpec.builder(boolean.class, "SIGNED_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$L", field.isSigned())
+                    .build());
+        }
+
+        if (field.getType() == CobolDataType.DISPLAY && field.isSigned() && field.isSignSeparate()) {
+            boolean isLeadingSign = field.getSignPosition() != null && !field.getSignPosition().isEmpty()
+                    && "LEADING".equalsIgnoreCase(field.getSignPosition());
+            builder.addField(FieldSpec.builder(boolean.class, "LEADING_SIGN_" + suffix, Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
+                    .initializer("$L", isLeadingSign)
+                    .build());
+        }
+    }
+
+    private boolean isNumericPicture(FieldDefinition field) {
+        String picture = field.getPicture();
+        return picture != null && (picture.startsWith("9") || picture.startsWith("S9"));
     }
 
     /**

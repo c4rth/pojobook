@@ -60,6 +60,12 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
         assertFalse(generatedCode.contains("catch (Exception e)"));
 
+        // Check for cached metadata constants and usage in generated methods
+        assertTrue(generatedCode.contains("private static final int LEN_EMPLOYEEID = 8;"));
+        assertTrue(generatedCode.contains("private static final boolean IS_NUMERIC_EMPLOYEEID = true;"));
+        assertTrue(generatedCode.contains("serializeDisplayStringDirect(buffer, offset + OFFSET_EMPLOYEEID, this.employeeId, LEN_EMPLOYEEID, IS_NUMERIC_EMPLOYEEID, charset)"));
+        assertTrue(generatedCode.contains("deserializeDisplayInteger(data, offset + OFFSET_EMPLOYEEID, LEN_EMPLOYEEID, charset)"));
+
         // Check that there are NO annotations
         assertFalse(generatedCode.contains("@CobolField"));
         assertFalse(generatedCode.contains("@CobolRecord"));

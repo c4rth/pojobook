@@ -173,13 +173,13 @@ public class SerializationMethodsGenerator {
                 method.addStatement("int $L = $L", baseOffsetVar, actualOffset)
                         .addStatement("int $L = $L", posVar, baseOffsetVar);
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
-                addFieldSerializationCode(method, field, objectRef + "." + fieldName + "[i]",
+                addFieldSerializationCode(method, fieldName, field, objectRef + "." + fieldName + "[i]",
                         posVar, "buffer");
                 method.addStatement("$L += $L", posVar, sizeConstant);
                 method.endControlFlow();
             } else {
                 // Single field
-                addFieldSerializationCode(method, field, objectRef + "." + fieldName, actualOffset, "buffer");
+                addFieldSerializationCode(method, fieldName, field, objectRef + "." + fieldName, actualOffset, "buffer");
             }
         }
     }
@@ -187,51 +187,53 @@ public class SerializationMethodsGenerator {
     /**
      * Add serialization code for a single field value.
      */
-    private void addFieldSerializationCode(MethodSpec.Builder method, FieldDefinition field,
+    private void addFieldSerializationCode(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                            String valueRef, String offsetExpr, String bufferName) {
         switch (field.getType()) {
-            case DISPLAY -> addDisplaySerialization(method, field, valueRef, offsetExpr, bufferName);
-            case COMP, COMP_5 -> addCompSerialization(method, field, valueRef, offsetExpr, bufferName);
+            case DISPLAY -> addDisplaySerialization(method, fieldName, field, valueRef, offsetExpr, bufferName);
+            case COMP, COMP_5 -> addCompSerialization(method, fieldName, field, valueRef, offsetExpr, bufferName);
             case COMP_1 -> addComp1Serialization(method, valueRef, offsetExpr, bufferName);
             case COMP_2 -> addComp2Serialization(method, valueRef, offsetExpr, bufferName);
-            case COMP_3, PACKED_DECIMAL -> addComp3Serialization(method, field, valueRef, offsetExpr, bufferName);
-            case ZONED_DECIMAL -> addZonedDecimalSerialization(method, field, valueRef, offsetExpr, bufferName);
+            case COMP_3, PACKED_DECIMAL -> addComp3Serialization(method, fieldName, field, valueRef, offsetExpr, bufferName);
+            case ZONED_DECIMAL -> addZonedDecimalSerialization(method, fieldName, field, valueRef, offsetExpr, bufferName);
         }
     }
 
-    private void addDisplaySerialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addDisplaySerialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                          String valueRef, String offsetExpr, String bufferName) {
         int length = offsetCalculator.calculateFieldSize(field);
         if (length == 0) {
             return;
         }
+        String lenConstant = lengthConstantName(fieldName);
+        String isNumericConstant = isNumericConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
         boolean isNumeric = isNumericPicture(field);
         boolean signed = field.isSigned();
         boolean signSeparate = field.isSignSeparate();
-        int decimalDigits = field.getDecimalDigits();
-        boolean isLeadingSign = field.getSignPosition() != null && !field.getSignPosition().isEmpty()
-                && "LEADING".equalsIgnoreCase(field.getSignPosition());
 
         if (signed && signSeparate) {
+            String leadingSignConstant = leadingSignConstantName(fieldName);
             method.addStatement("$T.serializeDisplayWithSeparateSignDirect($L, $L, $L, $L, $L, $L, charset)",
-                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, decimalDigits, isLeadingSign);
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, lenConstant, decimalDigitsConstant,
+                    leadingSignConstant);
         } else if (signed && !signSeparate && isNumeric) {
             method.addStatement("$T.serializeDisplayWithEmbeddedSignDirect($L, $L, $L, $L, $L, charset)",
-                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, decimalDigits);
-        } else if (!signed && decimalDigits > 0 && isNumeric) {
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, lenConstant, decimalDigitsConstant);
+        } else if (!signed && field.getDecimalDigits() > 0 && isNumeric) {
             method.addStatement("$T.serializeDisplayWithImpliedDecimalDirect($L, $L, $L, $L, $L, charset)",
-                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, decimalDigits);
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, lenConstant, decimalDigitsConstant);
         } else {
             method.addStatement("$T.serializeDisplayStringDirect($L, $L, $L, $L, $L, charset)",
-                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, length, isNumeric);
+                    CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, lenConstant, isNumericConstant);
         }
     }
 
-    private void addCompSerialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addCompSerialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                       String valueRef, String offsetExpr, String bufferName) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
+        String totalDigitsConstant = totalDigitsConstantName(fieldName);
         method.addStatement("$T.serializeCompDirect($L, $L, $L, $L)",
-                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigits);
+                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant);
     }
 
     private void addComp1Serialization(MethodSpec.Builder method, String valueRef, String offsetExpr, String bufferName) {
@@ -244,18 +246,46 @@ public class SerializationMethodsGenerator {
                 CobolFieldSerializer.class, bufferName, offsetExpr, valueRef);
     }
 
-    private void addComp3Serialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addComp3Serialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                        String valueRef, String offsetExpr, String bufferName) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
+        String totalDigitsConstant = totalDigitsConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
         method.addStatement("$T.serializeComp3Direct($L, $L, $L, $L, $L)",
-                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigits, field.getDecimalDigits());
+                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, decimalDigitsConstant);
     }
 
-    private void addZonedDecimalSerialization(MethodSpec.Builder method, FieldDefinition field,
+    private void addZonedDecimalSerialization(MethodSpec.Builder method, String fieldName, FieldDefinition field,
                                               String valueRef, String offsetExpr, String bufferName) {
-        int totalDigits = field.getIntegerDigits() + field.getDecimalDigits();
+        String totalDigitsConstant = totalDigitsConstantName(fieldName);
+        String decimalDigitsConstant = decimalDigitsConstantName(fieldName);
+        String signedConstant = signedConstantName(fieldName);
         method.addStatement("$T.serializeZonedDecimalDirect($L, $L, $L, $L, $L, $L)",
-                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigits, field.getDecimalDigits(), field.isSigned());
+                CobolFieldSerializer.class, bufferName, offsetExpr, valueRef, totalDigitsConstant, decimalDigitsConstant,
+                signedConstant);
+    }
+
+    private String lengthConstantName(String fieldName) {
+        return "LEN_" + fieldName.toUpperCase();
+    }
+
+    private String isNumericConstantName(String fieldName) {
+        return "IS_NUMERIC_" + fieldName.toUpperCase();
+    }
+
+    private String decimalDigitsConstantName(String fieldName) {
+        return "DECIMAL_DIGITS_" + fieldName.toUpperCase();
+    }
+
+    private String totalDigitsConstantName(String fieldName) {
+        return "TOTAL_DIGITS_" + fieldName.toUpperCase();
+    }
+
+    private String signedConstantName(String fieldName) {
+        return "SIGNED_" + fieldName.toUpperCase();
+    }
+
+    private String leadingSignConstantName(String fieldName) {
+        return "LEADING_SIGN_" + fieldName.toUpperCase();
     }
 
     /**
