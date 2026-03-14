@@ -16,7 +16,6 @@ import javax.lang.model.element.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.Charset;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -47,7 +46,8 @@ public class DeserializationMethodsGenerator {
      */
     public void addDeserializeMethods(TypeSpec.Builder builder, String className, List<FieldNode> fieldTree) {
         addDeserializeWithDefaultCharset(builder, className);
-        addDeserializeWithCharset(builder, className, fieldTree);
+        addDeserializeWithCharset(builder, className);
+        addDeserializeFromBuffer(builder, className, fieldTree);
     }
 
     private void addDeserializeWithDefaultCharset(TypeSpec.Builder builder, String className) {
@@ -66,7 +66,7 @@ public class DeserializationMethodsGenerator {
         builder.addMethod(method);
     }
 
-    private void addDeserializeWithCharset(TypeSpec.Builder builder, String className, List<FieldNode> fieldTree) {
+    private void addDeserializeWithCharset(TypeSpec.Builder builder, String className) {
         MethodSpec.Builder method = MethodSpec.methodBuilder("deserialize")
                 .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
                 .returns(ClassName.bestGuess(className))
@@ -75,6 +75,26 @@ public class DeserializationMethodsGenerator {
                 .addException(DeserializationException.class)
                 .addJavadoc("Deserialize COBOL binary data to create an instance of this class.\n")
                 .addJavadoc("@param data byte array containing the serialized data\n")
+                .addJavadoc("@return deserialized instance\n")
+                .addJavadoc("@throws DeserializationException if deserialization fails\n");
+
+        method.addStatement("return deserializeFromBuffer(data, 0, charset)");
+
+        builder.addMethod(method.build());
+    }
+
+    private void addDeserializeFromBuffer(TypeSpec.Builder builder, String className, List<FieldNode> fieldTree) {
+        MethodSpec.Builder method = MethodSpec.methodBuilder("deserializeFromBuffer")
+                .addModifiers(Modifier.PRIVATE, Modifier.STATIC)
+                .returns(ClassName.bestGuess(className))
+                .addParameter(byte[].class, "data")
+                .addParameter(int.class, "offset")
+                .addParameter(Charset.class, "charset")
+                .addException(DeserializationException.class)
+                .addJavadoc("Deserialize COBOL binary data from a byte array starting at a given offset.\n")
+                .addJavadoc("@param data source byte array containing serialized data\n")
+                .addJavadoc("@param offset start position in the source array\n")
+                .addJavadoc("@param charset character encoding\n")
                 .addJavadoc("@return deserialized instance\n")
                 .addJavadoc("@throws DeserializationException if deserialization fails\n");
 
@@ -111,10 +131,8 @@ public class DeserializationMethodsGenerator {
             // Nested class array
             String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
             method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs())
-                    .addStatement("byte[] elementData = $T.copyOfRange(data, $L + (i * $L), $L + ((i + 1) * $L))",
-                            Arrays.class, offsetConstant, sizeConstant, offsetConstant, sizeConstant)
-                    .addStatement("$L.$L[i] = $L.deserialize(elementData, charset)",
-                            instanceRef, fieldName, NamingUtils.toPascalCase(field.getName()))
+                    .addStatement("$L.$L[i] = $L.deserializeFromBuffer(data, offset + $L + (i * $L), charset)",
+                            instanceRef, fieldName, NamingUtils.toPascalCase(field.getName()), offsetConstant, sizeConstant)
                     .endControlFlow();
 
         } else if (field.isGroup() && field.getOccurs() == 1 && !node.getChildren().isEmpty()) {
@@ -130,12 +148,12 @@ public class DeserializationMethodsGenerator {
                 String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
                 addFieldDeserializationCode(method, field, instanceRef + "." + fieldName + "[i]",
-                        "data", offsetConstant + " + (i * " + sizeConstant + ")");
+                        "data", "offset + " + offsetConstant + " + (i * " + sizeConstant + ")");
                 method.endControlFlow();
             } else {
                 // Single field
                 addFieldDeserializationCode(method, field, instanceRef + "." + fieldName,
-                        "data", offsetConstant);
+                        "data", "offset + " + offsetConstant);
             }
         }
     }

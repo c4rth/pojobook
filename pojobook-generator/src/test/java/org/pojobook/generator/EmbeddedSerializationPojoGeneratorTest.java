@@ -137,7 +137,9 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("Department[]"));
 
         // Check for serialization in nested class
-        assertTrue(generatedCode.contains("Department.deserialize"));
+        assertTrue(generatedCode.contains("Department.deserializeFromBuffer(data,"));
+        assertTrue(generatedCode.contains("private static CompanyRecord deserializeFromBuffer(byte[] data, int offset, Charset charset)"));
+        assertFalse(generatedCode.contains("Arrays.copyOfRange"));
 
         // Check for no annotations
         assertFalse(generatedCode.contains("@CobolField"));
