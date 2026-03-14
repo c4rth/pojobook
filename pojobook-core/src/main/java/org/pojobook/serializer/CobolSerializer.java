@@ -3,13 +3,13 @@ package org.pojobook.serializer;
 import org.pojobook.annotation.CobolField;
 import org.pojobook.annotation.CobolRecord;
 import org.pojobook.exception.SerializationException;
+import org.pojobook.util.CobolFieldUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.math.BigDecimal;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
@@ -30,10 +30,17 @@ public class CobolSerializer {
     // Cache for single-occur field annotations to avoid expensive proxy creation
     private static final Map<CobolField, CobolField> SINGLE_OCCUR_CACHE = new ConcurrentHashMap<>();
 
+    // Cache for nested class type detection to avoid repeated reflection scans
+    private static final Map<Class<?>, Boolean> NESTED_CLASS_CACHE = new ConcurrentHashMap<>();
+
     /**
      * Cached field metadata for performance.
+     *
+     * @param scaleFactor pre-computed {@code BigDecimal.TEN.pow(decimalDigits)} for COMP-3 / ZONED-DECIMAL
+     *                    fields with decimal digits, or {@code null} if no scaling is needed
      */
-    private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength) {
+    private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength,
+                                 BigDecimal scaleFactor, boolean isNumericPicture) {
         public FieldMetadata {
             field.setAccessible(true);
         }
@@ -41,6 +48,10 @@ public class CobolSerializer {
 
     /**
      * Serialize a POJO to COBOL binary format.
+     * <p>
+     * Allocates a single {@code byte[]} of the exact required size and writes
+     * all fields directly into it using {@code *Direct} methods, avoiding
+     * intermediate byte[] allocations and ByteArrayOutputStream overhead.
      */
     public byte[] serialize(Object pojo, Charset charset) throws SerializationException {
         validatePojo(pojo);
@@ -48,12 +59,21 @@ public class CobolSerializer {
         List<FieldMetadata> fields = getFieldMetadata(pojo.getClass());
         int totalSize = calculateTotalSize(fields);
 
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(totalSize);
-        for (FieldMetadata fieldMeta : fields) {
-            writeField(fieldMeta, pojo, baos, charset);
-        }
+        byte[] buffer = new byte[totalSize];
+        serializeFields(pojo, fields, buffer, 0, charset);
+        return buffer;
+    }
 
-        return baos.toByteArray();
+    /**
+     * Serialize all fields of a POJO into a buffer at the given offset.
+     */
+    private void serializeFields(Object pojo, List<FieldMetadata> fields, byte[] buffer,
+                                 int startOffset, Charset charset) throws SerializationException {
+        int offset = startOffset;
+        for (FieldMetadata fieldMeta : fields) {
+            writeFieldDirect(fieldMeta, pojo, buffer, offset, charset);
+            offset += fieldMeta.fieldSize;
+        }
     }
 
     /**
@@ -65,20 +85,60 @@ public class CobolSerializer {
 
     /**
      * Compute field metadata for a class.
+     * Uses {@link CobolFieldUtil#calculateFieldLength} for correct byte sizes across all COBOL types.
      */
     private List<FieldMetadata> computeFieldMetadata(Class<?> clazz) {
         return Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(CobolField.class))
                 .map(f -> {
                     CobolField annotation = f.getAnnotation(CobolField.class);
-                    int baseLength = annotation.length() > 0 ? annotation.length() : annotation.integerDigits() + annotation.decimalDigits();
-                    if (annotation.signed() && annotation.signSeparate()) {
-                        baseLength++;
+
+                    int baseLength;
+                    Class<?> fieldType = f.getType();
+                    if (fieldType.isArray() && isNestedClassType(fieldType.getComponentType())) {
+                        baseLength = computeNestedClassSize(fieldType.getComponentType());
+                    } else {
+                        baseLength = CobolFieldUtil.calculateFieldLength(annotation);
                     }
-                    int size = baseLength * annotation.occurs();
-                    return new FieldMetadata(f, annotation, size, baseLength);
+
+                    int size = baseLength * Math.max(1, annotation.occurs());
+
+                    // Pre-compute scale factor for COMP-3 / ZONED-DECIMAL with decimal digits
+                    BigDecimal scaleFactor = null;
+                    if (annotation.decimalDigits() > 0) {
+                        var type = annotation.type();
+                        if (type == org.pojobook.CobolDataType.COMP_3
+                                || type == org.pojobook.CobolDataType.PACKED_DECIMAL
+                                || type == org.pojobook.CobolDataType.ZONED_DECIMAL) {
+                            scaleFactor = BigDecimal.TEN.pow(annotation.decimalDigits());
+                        }
+                    }
+
+                    return new FieldMetadata(f, annotation, size, baseLength, scaleFactor,
+                            isNumericPicture(annotation.picture()));
                 })
                 .toList();
+    }
+
+    /**
+     * Compute the total byte size of a nested class by summing its COBOL field lengths.
+     * Uses direct reflection instead of {@link #getFieldMetadata} to avoid recursive
+     * {@code ConcurrentHashMap.computeIfAbsent} calls.
+     */
+    private int computeNestedClassSize(Class<?> clazz) {
+        return Arrays.stream(clazz.getDeclaredFields())
+                .filter(f -> f.isAnnotationPresent(CobolField.class))
+                .mapToInt(f -> {
+                    CobolField ann = f.getAnnotation(CobolField.class);
+                    int base;
+                    if (f.getType().isArray() && isNestedClassType(f.getType().getComponentType())) {
+                        base = computeNestedClassSize(f.getType().getComponentType());
+                    } else {
+                        base = CobolFieldUtil.calculateFieldLength(ann);
+                    }
+                    return base * Math.max(1, ann.occurs());
+                })
+                .sum();
     }
 
     /**
@@ -99,89 +159,116 @@ public class CobolSerializer {
         }
     }
 
-    private void writeField(FieldMetadata fieldMeta, Object pojo, ByteArrayOutputStream baos, Charset charset) throws SerializationException {
+    /**
+     * Write a single field directly into the buffer at the given offset.
+     */
+    private void writeFieldDirect(FieldMetadata fieldMeta, Object pojo, byte[] buffer,
+                                  int offset, Charset charset) throws SerializationException {
         try {
             Object value = fieldMeta.field.get(pojo);
-            byte[] fieldBytes = serializeFieldWithMeta(value, fieldMeta, charset);
-            baos.write(fieldBytes);
-        } catch (IllegalAccessException | IOException e) {
+            if (value == null) {
+                // buffer is already zero-filled by Java, nothing to do
+                return;
+            }
+
+            if (value.getClass().isArray()) {
+                serializeArrayDirect(value, fieldMeta.annotation, fieldMeta.baseLength, buffer, offset, charset);
+            } else {
+                serializeSimpleFieldDirect(value, fieldMeta.annotation, fieldMeta.baseLength,
+                        fieldMeta.scaleFactor, fieldMeta.isNumericPicture, buffer, offset, charset);
+            }
+        } catch (IllegalAccessException e) {
             logger.error("Error serializing field: {}", fieldMeta.field.getName(), e);
             throw new SerializationException("Serialization error field: " + fieldMeta.field.getName(), e);
         }
     }
 
     /**
-     * Serialize a single field with metadata.
+     * Serialize a simple (non-array) field directly into the buffer.
+     *
+     * @param scaleFactor pre-computed scale factor for COMP-3/ZONED-DECIMAL, or {@code null}
+     * @param isNumericPicture cached result of whether the picture is numeric
      */
-    private byte[] serializeFieldWithMeta(Object value, FieldMetadata fieldMeta, Charset charset) throws SerializationException {
-        if (value == null) {
-            return new byte[fieldMeta.fieldSize];
+    private void serializeSimpleFieldDirect(Object value, CobolField cobolField, int baseLength,
+                                            BigDecimal scaleFactor, boolean isNumericPicture,
+                                            byte[] buffer, int offset, Charset charset) {
+        switch (cobolField.type()) {
+            case DISPLAY -> serializeDisplayDirect(value, cobolField, baseLength, isNumericPicture, buffer, offset, charset);
+            case COMP, COMP_5 -> CobolFieldSerializer.serializeCompDirect(buffer, offset, value,
+                    cobolField.integerDigits() + cobolField.decimalDigits());
+            case COMP_1 -> CobolFieldSerializer.serializeComp1Direct(buffer, offset, value);
+            case COMP_2 -> CobolFieldSerializer.serializeComp2Direct(buffer, offset, value);
+            case COMP_3, PACKED_DECIMAL -> CobolFieldSerializer.serializeComp3Direct(buffer, offset, value,
+                    cobolField.integerDigits() + cobolField.decimalDigits(), scaleFactor);
+            case ZONED_DECIMAL -> CobolFieldSerializer.serializeZonedDecimalDirect(buffer, offset, value,
+                    cobolField.integerDigits() + cobolField.decimalDigits(), scaleFactor,
+                    cobolField.signed());
         }
-
-        return value.getClass().isArray()
-                ? serializeArray(value, fieldMeta.annotation, charset)
-                : serializeSimpleFieldWithLength(value, fieldMeta.annotation, fieldMeta.baseLength(), charset);
-    }
-
-    private byte[] createNullFieldBytes(CobolField cobolField) {
-        int fieldLength = calculateFieldLength(cobolField);
-        return new byte[fieldLength];
-    }
-
-    private int calculateFieldLength(CobolField field) {
-        int baseLength = field.length() > 0 ? field.length() : field.integerDigits() + field.decimalDigits();
-        if (field.signed() && field.signSeparate()) {
-            baseLength++;
-        }
-        return baseLength * field.occurs();
-    }
-
-    private byte[] serializeSimpleField(Object value, CobolField cobolField, Charset charset) {
-        return switch (cobolField.type()) {
-            case DISPLAY -> serializeDisplay(value, cobolField, charset);
-            case COMP, COMP_5 -> serializeComp(value, cobolField);
-            case COMP_1 -> serializeComp1(value);
-            case COMP_2 -> serializeComp2(value);
-            case COMP_3, PACKED_DECIMAL -> serializeComp3(value, cobolField);
-            case ZONED_DECIMAL -> serializeZonedDecimal(value, cobolField);
-        };
-    }
-
-    private byte[] serializeSimpleFieldWithLength(Object value, CobolField cobolField, int baseLength, Charset charset) {
-        return switch (cobolField.type()) {
-            case DISPLAY -> serializeDisplayWithLength(value, cobolField, baseLength, charset);
-            case COMP, COMP_5 -> serializeComp(value, cobolField);
-            case COMP_1 -> serializeComp1(value);
-            case COMP_2 -> serializeComp2(value);
-            case COMP_3, PACKED_DECIMAL -> serializeComp3(value, cobolField);
-            case ZONED_DECIMAL -> serializeZonedDecimal(value, cobolField);
-        };
     }
 
     /**
-     * Serialize an array field (handles both primitive arrays and nested class arrays).
+     * Serialize a DISPLAY field directly into the buffer.
      */
-    private byte[] serializeArray(Object arrayValue, CobolField cobolField, Charset charset) throws SerializationException {
-        int length = Array.getLength(arrayValue);
+    private void serializeDisplayDirect(Object value, CobolField field, int baseLength,
+                                        boolean isNumericPicture, byte[] buffer, int offset, Charset charset) {
+        int digitLength = baseLength;
+        if (field.signed() && field.signSeparate()) {
+            digitLength = baseLength - 1;
+        }
 
-        // Get cached single-occur field to avoid creating expensive proxy for each element
+        boolean isSignLeading = "LEADING".equalsIgnoreCase(field.signPosition());
+
+        if (field.signed() && field.signSeparate() && value instanceof Number num) {
+            CobolFieldSerializer.serializeDisplayWithSeparateSignDirect(buffer, offset, num,
+                    digitLength, field.decimalDigits(), isSignLeading, charset);
+        } else if (field.signed() && !field.signSeparate() && value instanceof Number num && isNumericPicture) {
+            CobolFieldSerializer.serializeDisplayWithEmbeddedSignDirect(buffer, offset, num,
+                    digitLength, field.decimalDigits(), charset);
+        } else if (!field.signed() && field.decimalDigits() > 0 && value instanceof Number num && isNumericPicture) {
+            CobolFieldSerializer.serializeDisplayWithImpliedDecimalDirect(buffer, offset, num,
+                    digitLength, field.decimalDigits(), charset);
+        } else {
+            CobolFieldSerializer.serializeDisplayStringDirect(buffer, offset, value,
+                    baseLength, isNumericPicture, charset);
+        }
+    }
+
+    /**
+     * Serialize an array field directly into the buffer.
+     */
+    private void serializeArrayDirect(Object arrayValue, CobolField cobolField, int elementSize,
+                                      byte[] buffer, int offset, Charset charset) throws SerializationException {
+        int length = Array.getLength(arrayValue);
         CobolField singleOccurField = getSingleOccurField(cobolField);
 
-        // Pre-calculate element size for buffer allocation
-        int elementSize = calculateFieldLength(singleOccurField);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(elementSize * length);
-
-        for (int i = 0; i < length; i++) {
-            Object element = Array.get(arrayValue, i);
-            byte[] elementBytes = serializeArrayElement(element, singleOccurField, charset);
-            try {
-                baos.write(elementBytes);
-            } catch (IOException e) {
-                throw new SerializationException("Error writing array element", e);
+        // Pre-compute scale factor once for the whole array
+        BigDecimal scaleFactor = null;
+        if (singleOccurField.decimalDigits() > 0) {
+            var type = singleOccurField.type();
+            if (type == org.pojobook.CobolDataType.COMP_3
+                    || type == org.pojobook.CobolDataType.PACKED_DECIMAL
+                    || type == org.pojobook.CobolDataType.ZONED_DECIMAL) {
+                scaleFactor = BigDecimal.TEN.pow(singleOccurField.decimalDigits());
             }
         }
 
-        return baos.toByteArray();
+        boolean isNumeric = isNumericPicture(singleOccurField.picture());
+
+        for (int i = 0; i < length; i++) {
+            Object element = Array.get(arrayValue, i);
+            if (element == null) {
+                continue; // buffer already zero-filled
+            }
+
+            int elementOffset = offset + i * elementSize;
+            if (isNestedClassType(element.getClass())) {
+                List<FieldMetadata> nestedFields = getFieldMetadata(element.getClass());
+                serializeFields(element, nestedFields, buffer, elementOffset, charset);
+            } else {
+                serializeSimpleFieldDirect(element, singleOccurField, elementSize,
+                        scaleFactor, isNumeric, buffer, elementOffset, charset);
+            }
+        }
     }
 
     /**
@@ -191,204 +278,13 @@ public class CobolSerializer {
         return SINGLE_OCCUR_CACHE.computeIfAbsent(original, this::createSingleOccurField);
     }
 
-    private byte[] serializeArrayElement(Object element, CobolField singleOccurField, Charset charset) throws SerializationException {
-        if (element == null) {
-            return createNullFieldBytes(singleOccurField);
-        }
-
-        return isNestedClassType(element.getClass())
-                ? serialize(element, charset)
-                : serializeSimpleField(element, singleOccurField, charset);
-    }
-
     /**
      * Check if a type is a nested class with COBOL fields.
      */
     private boolean isNestedClassType(Class<?> type) {
-        return Arrays.stream(type.getDeclaredFields())
-                .anyMatch(f -> f.isAnnotationPresent(CobolField.class));
-    }
-
-    /**
-     * Create a CobolField annotation with occurs=1 for array element processing.
-     */
-    private CobolField createSingleOccurField(CobolField original) {
-        return new CobolField() {
-            @Override
-            public Class<? extends java.lang.annotation.Annotation> annotationType() {
-                return CobolField.class;
-            }
-
-            @Override
-            public int level() {
-                return original.level();
-            }
-
-            @Override
-            public String name() {
-                return original.name();
-            }
-
-            @Override
-            public String picture() {
-                return original.picture();
-            }
-
-            @Override
-            public org.pojobook.CobolDataType type() {
-                return original.type();
-            }
-
-            @Override
-            public int length() {
-                return original.length();
-            }
-
-            @Override
-            public int integerDigits() {
-                return original.integerDigits();
-            }
-
-            @Override
-            public int decimalDigits() {
-                return original.decimalDigits();
-            }
-
-            @Override
-            public boolean signed() {
-                return original.signed();
-            }
-
-            @Override
-            public String signPosition() {
-                return original.signPosition();
-            }
-
-            @Override
-            public boolean signSeparate() {
-                return original.signSeparate();
-            }
-
-            @Override
-            public int occurs() {
-                return 1;
-            }
-
-            @Override
-            public int minOccurs() {
-                return original.minOccurs();
-            }
-
-            @Override
-            public int maxOccurs() {
-                return original.maxOccurs();
-            }
-
-            @Override
-            public String dependingOn() {
-                return original.dependingOn();
-            }
-
-            @Override
-            public int position() {
-                return original.position();
-            }
-
-            @Override
-            public String redefines() {
-                return original.redefines();
-            }
-
-            @Override
-            public boolean filler() {
-                return original.filler();
-            }
-
-            @Override
-            public String value() {
-                return original.value();
-            }
-
-            @Override
-            public boolean justifiedRight() {
-                return original.justifiedRight();
-            }
-
-            @Override
-            public boolean blankWhenZero() {
-                return original.blankWhenZero();
-            }
-
-            @Override
-            public String sync() {
-                return original.sync();
-            }
-
-            @Override
-            public String[] indexedBy() {
-                return original.indexedBy();
-            }
-
-            @Override
-            public String[] keys() {
-                return original.keys();
-            }
-
-            @Override
-            public boolean ascendingKey() {
-                return original.ascendingKey();
-            }
-
-            @Override
-            public boolean descendingKey() {
-                return original.descendingKey();
-            }
-        };
-    }
-
-    /**
-     * Serialize a DISPLAY field.
-     */
-    private byte[] serializeDisplay(Object value, int length, int decimalDigits, boolean isNumeric,
-                                    boolean signed, boolean signSeparate, boolean isSignLeading,
-                                    Charset charset) {
-        if (signed && signSeparate && value instanceof Number) {
-            return CobolFieldSerializer.serializeDisplayWithSeparateSign((Number) value, length, decimalDigits, isSignLeading, charset);
-        }
-
-        if (signed && !signSeparate && value instanceof Number && isNumeric) {
-            return CobolFieldSerializer.serializeDisplayWithEmbeddedSign((Number) value, length, decimalDigits, charset);
-        }
-
-        if (!signed && decimalDigits > 0 && value instanceof Number && isNumeric) {
-            return CobolFieldSerializer.serializeDisplayWithImpliedDecimal((Number) value, length, decimalDigits, charset);
-        }
-
-        return CobolFieldSerializer.serializeDisplayString(value, length, isNumeric, charset);
-    }
-
-    /**
-     * Serialize DISPLAY field.
-     */
-    private byte[] serializeDisplay(Object value, CobolField field, Charset charset) {
-        int length = field.length() > 0 ? field.length() : field.integerDigits() + field.decimalDigits();
-
-        return serializeDisplay(value, length, field.decimalDigits(), isNumericPicture(field.picture()),
-                field.signed(), field.signSeparate(), "LEADING".equalsIgnoreCase(field.signPosition()), charset);
-    }
-
-    /**
-     * Serialize DISPLAY field with pre-calculated length (optimized).
-     */
-    private byte[] serializeDisplayWithLength(Object value, CobolField field, int baseLength, Charset charset) {
-        // If sign is separate, baseLength includes the sign byte, but we need just the digits
-        int digitLength = baseLength;
-        if (field.signed() && field.signSeparate()) {
-            digitLength = baseLength - 1;
-        }
-
-        return serializeDisplay(value, digitLength, field.decimalDigits(), isNumericPicture(field.picture()),
-                field.signed(), field.signSeparate(), "LEADING".equalsIgnoreCase(field.signPosition()), charset);
+        return NESTED_CLASS_CACHE.computeIfAbsent(type, t ->
+                Arrays.stream(t.getDeclaredFields())
+                        .anyMatch(f -> f.isAnnotationPresent(CobolField.class)));
     }
 
     private boolean isNumericPicture(String picture) {
@@ -396,39 +292,9 @@ public class CobolSerializer {
     }
 
     /**
-     * Serialize COMP/BINARY field.
+     * Create a CobolField annotation with occurs=1 for array element processing.
      */
-    private byte[] serializeComp(Object value, CobolField field) {
-        return CobolFieldSerializer.serializeComp(value, field.integerDigits() + field.decimalDigits());
-    }
-
-    /**
-     * Serialize COMP-1 (float) field.
-     */
-    private byte[] serializeComp1(Object value) {
-        return CobolFieldSerializer.serializeComp1(value);
-    }
-
-    /**
-     * Serialize COMP-2 (double) field.
-     */
-    private byte[] serializeComp2(Object value) {
-        return CobolFieldSerializer.serializeComp2(value);
-    }
-
-    /**
-     * Serialize COMP-3 (packed decimal) field.
-     */
-    private byte[] serializeComp3(Object value, CobolField field) {
-        int totalDigits = field.integerDigits() + field.decimalDigits();
-        return CobolFieldSerializer.serializeComp3(value, totalDigits, field.decimalDigits());
-    }
-
-    /**
-     * Serialize ZONED-DECIMAL field.
-     */
-    private byte[] serializeZonedDecimal(Object value, CobolField field) {
-        int totalDigits = field.integerDigits() + field.decimalDigits();
-        return CobolFieldSerializer.serializeZonedDecimal(value, totalDigits, field.decimalDigits(), field.signed());
+    private CobolField createSingleOccurField(CobolField original) {
+        return CobolFieldUtil.withSingleOccur(original);
     }
 }

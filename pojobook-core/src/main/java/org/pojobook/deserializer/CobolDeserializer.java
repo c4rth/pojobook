@@ -1,9 +1,9 @@
 package org.pojobook.deserializer;
 
-import org.pojobook.CobolDataType;
 import org.pojobook.annotation.CobolField;
 import org.pojobook.annotation.CobolRecord;
 import org.pojobook.exception.DeserializationException;
+import org.pojobook.util.CharsetMode;
 import org.pojobook.util.CobolFieldUtil;
 import org.pojobook.util.DisplayNumericUtil;
 import org.pojobook.util.SignedNumericUtil;
@@ -13,8 +13,6 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.math.RoundingMode;
-import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
@@ -33,11 +31,40 @@ public class CobolDeserializer {
     // Cache for single-occur field annotations
     private static final Map<CobolField, CobolField> SINGLE_OCCUR_CACHE = new ConcurrentHashMap<>();
 
+    // Cache for nested class type detection to avoid repeated reflection scans
+    private static final Map<Class<?>, Boolean> NESTED_CLASS_CACHE = new ConcurrentHashMap<>();
+
+    // Cache for nested class length to avoid repeated reflection + calculation
+    private static final Map<Class<?>, Integer> NESTED_CLASS_LENGTH_CACHE = new ConcurrentHashMap<>();
+
+    // Type category constants for fast int-based dispatch (avoids getSimpleName() allocation)
+    private static final int TYPE_INT = 1;
+    private static final int TYPE_LONG = 2;
+    private static final int TYPE_SHORT = 3;
+    private static final int TYPE_BIG_DECIMAL = 4;
+    private static final int TYPE_BIG_INTEGER = 5;
+    private static final int TYPE_DOUBLE = 6;
+    private static final int TYPE_FLOAT = 7;
+    private static final int TYPE_STRING = 8;
+    private static final int TYPE_OTHER = 0;
+
+    private static int classifyType(Class<?> type) {
+        if (type == int.class || type == Integer.class) return TYPE_INT;
+        if (type == long.class || type == Long.class) return TYPE_LONG;
+        if (type == String.class) return TYPE_STRING;
+        if (type == BigDecimal.class) return TYPE_BIG_DECIMAL;
+        if (type == BigInteger.class) return TYPE_BIG_INTEGER;
+        if (type == short.class || type == Short.class) return TYPE_SHORT;
+        if (type == double.class || type == Double.class) return TYPE_DOUBLE;
+        if (type == float.class || type == Float.class) return TYPE_FLOAT;
+        return TYPE_OTHER;
+    }
+
     /**
      * Cached field metadata for performance.
      */
     private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength,
-                                 Class<?> fieldType, boolean isNumeric, boolean isString) {
+                                 Class<?> fieldType, boolean isNumeric, boolean isString, int typeCategory) {
         public FieldMetadata {
             field.setAccessible(true);
         }
@@ -82,9 +109,9 @@ public class CobolDeserializer {
 
         return switch (fieldMeta.annotation.type()) {
             case DISPLAY -> deserializeDisplayOptimized(data, offset, fieldMeta.baseLength, fieldMeta, charset);
-            case COMP, COMP_5 -> deserializeCompDirect(data, offset, fieldMeta.baseLength, fieldMeta.fieldType);
-            case COMP_1 -> ByteBuffer.wrap(data, offset, 4).getFloat();
-            case COMP_2 -> ByteBuffer.wrap(data, offset, 8).getDouble();
+            case COMP, COMP_5 -> deserializeCompDirect(data, offset, fieldMeta.baseLength, fieldMeta.typeCategory);
+            case COMP_1 -> CobolFieldDeserializer.deserializeComp1(data, offset);
+            case COMP_2 -> CobolFieldDeserializer.deserializeComp2(data, offset);
             case COMP_3, PACKED_DECIMAL ->
                     deserializeComp3Direct(data, offset, fieldMeta.baseLength, fieldMeta.annotation);
             case ZONED_DECIMAL ->
@@ -122,8 +149,9 @@ public class CobolDeserializer {
                     Class<?> componentType = fieldType.isArray() ? fieldType.getComponentType() : fieldType;
                     boolean isNumeric = isNumericType(componentType);
                     boolean isString = componentType == String.class;
+                    int typeCategory = classifyType(componentType);
 
-                    return new FieldMetadata(f, annotation, size, baseLength, fieldType, isNumeric, isString);
+                    return new FieldMetadata(f, annotation, size, baseLength, fieldType, isNumeric, isString, typeCategory);
                 })
                 .toList();
     }
@@ -137,11 +165,12 @@ public class CobolDeserializer {
             return deserializeArrayDirect(data, offset, length, cobolField, fieldType, charset);
         }
 
+        int typeCategory = classifyType(fieldType);
         return switch (cobolField.type()) {
-            case DISPLAY -> deserializeDisplayDirect(data, offset, length, cobolField, fieldType, charset);
-            case COMP, COMP_5 -> deserializeCompDirect(data, offset, length, fieldType);
-            case COMP_1 -> ByteBuffer.wrap(data, offset, 4).getFloat();
-            case COMP_2 -> ByteBuffer.wrap(data, offset, 8).getDouble();
+            case DISPLAY -> deserializeDisplayDirect(data, offset, length, cobolField, typeCategory, charset);
+            case COMP, COMP_5 -> deserializeCompDirect(data, offset, length, typeCategory);
+            case COMP_1 -> CobolFieldDeserializer.deserializeComp1(data, offset);
+            case COMP_2 -> CobolFieldDeserializer.deserializeComp2(data, offset);
             case COMP_3, PACKED_DECIMAL -> deserializeComp3Direct(data, offset, length, cobolField);
             case ZONED_DECIMAL -> deserializeZonedDecimalDirect(data, offset, length, cobolField);
         };
@@ -227,20 +256,20 @@ public class CobolDeserializer {
      * Deserialize DISPLAY field using direct array access.
      */
     private Object deserializeDisplayDirect(byte[] data, int offset, int length, CobolField field,
-                                            Class<?> targetType, Charset charset) {
+                                            int typeCategory, Charset charset) {
         if (field.signed() && field.signSeparate()) {
-            return deserializeDisplayWithSeparateSign(Arrays.copyOfRange(data, offset, offset + length), field, targetType, charset);
+            return deserializeDisplayWithSeparateSign(data, offset, length, field, typeCategory, charset);
         }
 
-        if (field.signed() && !field.signSeparate() && isNumericType(targetType)) {
-            return deserializeDisplayWithEmbeddedSignDirect(data, offset, length, field, targetType, charset);
+        if (field.signed() && !field.signSeparate() && isNumericTypeCategory(typeCategory)) {
+            return deserializeDisplayWithEmbeddedSignDirect(data, offset, length, field, typeCategory, charset);
         }
 
-        if (!field.signed() && field.decimalDigits() > 0 && isNumericType(targetType)) {
-            return deserializeDisplayWithImpliedDecimalDirect(data, offset, length, field, targetType, charset);
+        if (!field.signed() && field.decimalDigits() > 0 && isNumericTypeCategory(typeCategory)) {
+            return deserializeDisplayWithImpliedDecimalDirect(data, offset, length, field, typeCategory, charset);
         }
 
-        return deserializeDisplayStringDirect(data, offset, length, targetType, charset);
+        return deserializeDisplayStringDirect(data, offset, length, typeCategory, charset);
     }
 
     /**
@@ -256,19 +285,19 @@ public class CobolDeserializer {
         }
 
         if (field.signed() && field.signSeparate()) {
-            return deserializeDisplayWithSeparateSign(Arrays.copyOfRange(data, offset, offset + length),
-                    field, fieldMeta.fieldType, charset);
+            return deserializeDisplayWithSeparateSign(data, offset, length,
+                    field, fieldMeta.typeCategory, charset);
         }
 
         if (field.signed() && !field.signSeparate() && fieldMeta.isNumeric) {
-            return deserializeDisplayWithEmbeddedSignDirect(data, offset, length, field, fieldMeta.fieldType, charset);
+            return deserializeDisplayWithEmbeddedSignDirect(data, offset, length, field, fieldMeta.typeCategory, charset);
         }
 
         if (!field.signed() && field.decimalDigits() > 0 && fieldMeta.isNumeric) {
-            return deserializeDisplayWithImpliedDecimalDirect(data, offset, length, field, fieldMeta.fieldType, charset);
+            return deserializeDisplayWithImpliedDecimalDirect(data, offset, length, field, fieldMeta.typeCategory, charset);
         }
 
-        return deserializeDisplayStringDirect(data, offset, length, fieldMeta.fieldType, charset);
+        return deserializeDisplayStringDirect(data, offset, length, fieldMeta.typeCategory, charset);
     }
 
     /**
@@ -281,22 +310,22 @@ public class CobolDeserializer {
     /**
      * Deserialize DISPLAY string using direct array access.
      */
-    private Object deserializeDisplayStringDirect(byte[] data, int offset, int length, Class<?> targetType, Charset charset) {
+    private Object deserializeDisplayStringDirect(byte[] data, int offset, int length, int typeCategory, Charset charset) {
         String strValue = CobolFieldDeserializer.deserializeDisplayString(data, offset, length, charset);
 
-        if (targetType == String.class) {
+        if (typeCategory == TYPE_STRING) {
             return strValue;
         }
 
         if (strValue.isEmpty()) {
-            return getDefaultValue(targetType);
+            return getDefaultValue(typeCategory);
         }
 
-        return switch (targetType.getSimpleName()) {
-            case "Integer", "int" -> Integer.parseInt(strValue);
-            case "Long", "long" -> Long.parseLong(strValue);
-            case "BigDecimal" -> new BigDecimal(strValue);
-            case "BigInteger" -> new BigInteger(strValue);
+        return switch (typeCategory) {
+            case TYPE_INT -> Integer.parseInt(strValue);
+            case TYPE_LONG -> Long.parseLong(strValue);
+            case TYPE_BIG_DECIMAL -> new BigDecimal(strValue);
+            case TYPE_BIG_INTEGER -> new BigInteger(strValue);
             default -> strValue;
         };
     }
@@ -305,17 +334,17 @@ public class CobolDeserializer {
      * Deserialize DISPLAY with implied decimal using direct array access.
      */
     private Object deserializeDisplayWithImpliedDecimalDirect(byte[] data, int offset, int length,
-                                                              CobolField field, Class<?> targetType, Charset charset) {
-        return switch (targetType.getSimpleName()) {
-            case "Integer", "int" ->
+                                                              CobolField field, int typeCategory, Charset charset) {
+        return switch (typeCategory) {
+            case TYPE_INT ->
                     CobolFieldDeserializer.deserializeDisplayIntegerWithDecimal(data, offset, length, charset, field.decimalDigits());
-            case "Long", "long" ->
+            case TYPE_LONG ->
                     CobolFieldDeserializer.deserializeDisplayLongWithDecimal(data, offset, length, charset, field.decimalDigits());
-            case "BigDecimal" ->
+            case TYPE_BIG_DECIMAL ->
                     CobolFieldDeserializer.deserializeDisplayBigDecimalWithDecimal(data, offset, length, charset, field.decimalDigits());
-            case "BigInteger" ->
+            case TYPE_BIG_INTEGER ->
                     CobolFieldDeserializer.deserializeDisplayBigDecimalWithDecimal(data, offset, length, charset, field.decimalDigits()).toBigInteger();
-            default -> getDefaultValue(targetType);
+            default -> getDefaultValue(typeCategory);
         };
     }
 
@@ -323,28 +352,28 @@ public class CobolDeserializer {
      * Deserialize DISPLAY with embedded sign using direct array access.
      */
     private Object deserializeDisplayWithEmbeddedSignDirect(byte[] data, int offset, int length,
-                                                            CobolField field, Class<?> targetType, Charset charset) {
-        return switch (targetType.getSimpleName()) {
-            case "Integer", "int" ->
+                                                            CobolField field, int typeCategory, Charset charset) {
+        return switch (typeCategory) {
+            case TYPE_INT ->
                     CobolFieldDeserializer.deserializeDisplaySignedInteger(data, offset, length, charset);
-            case "Long", "long" -> CobolFieldDeserializer.deserializeDisplaySignedLong(data, offset, length, charset);
-            case "BigDecimal" ->
+            case TYPE_LONG -> CobolFieldDeserializer.deserializeDisplaySignedLong(data, offset, length, charset);
+            case TYPE_BIG_DECIMAL ->
                     CobolFieldDeserializer.deserializeDisplaySignedBigDecimal(data, offset, length, charset, field.decimalDigits());
-            case "BigInteger" ->
+            case TYPE_BIG_INTEGER ->
                     CobolFieldDeserializer.deserializeDisplaySignedBigInteger(data, offset, length, charset);
-            default -> getDefaultValue(targetType);
+            default -> getDefaultValue(typeCategory);
         };
     }
 
     /**
      * Deserialize COMP using direct array access.
      */
-    private Object deserializeCompDirect(byte[] data, int offset, int length, Class<?> targetType) {
-        return switch (targetType.getSimpleName()) {
-            case "Short", "short" -> CobolFieldDeserializer.deserializeCompShort(data, offset, length);
-            case "Integer", "int" -> CobolFieldDeserializer.deserializeCompInteger(data, offset, length);
-            case "Long", "long" -> CobolFieldDeserializer.deserializeCompLong(data, offset, length);
-            case "BigInteger" -> CobolFieldDeserializer.deserializeCompBigInteger(data, offset, length);
+    private Object deserializeCompDirect(byte[] data, int offset, int length, int typeCategory) {
+        return switch (typeCategory) {
+            case TYPE_SHORT -> CobolFieldDeserializer.deserializeCompShort(data, offset, length);
+            case TYPE_INT -> CobolFieldDeserializer.deserializeCompInteger(data, offset, length);
+            case TYPE_LONG -> CobolFieldDeserializer.deserializeCompLong(data, offset, length);
+            case TYPE_BIG_INTEGER -> CobolFieldDeserializer.deserializeCompBigInteger(data, offset, length);
             default -> 0;
         };
     }
@@ -388,8 +417,8 @@ public class CobolDeserializer {
         return switch (cobolField.type()) {
             case DISPLAY -> deserializeDisplay(data, cobolField, fieldType, charset);
             case COMP, COMP_5 -> deserializeComp(data, fieldType);
-            case COMP_1 -> ByteBuffer.wrap(data).getFloat();
-            case COMP_2 -> ByteBuffer.wrap(data).getDouble();
+            case COMP_1 -> CobolFieldDeserializer.deserializeComp1(data, 0);
+            case COMP_2 -> CobolFieldDeserializer.deserializeComp2(data, 0);
             case COMP_3, PACKED_DECIMAL -> deserializeComp3(data, cobolField);
             case ZONED_DECIMAL -> deserializeZonedDecimal(data, cobolField);
         };
@@ -436,174 +465,54 @@ public class CobolDeserializer {
      * Check if a type is a nested class with COBOL fields.
      */
     private boolean isNestedClassType(Class<?> type) {
-        return Arrays.stream(type.getDeclaredFields())
-                .anyMatch(field -> field.isAnnotationPresent(CobolField.class));
+        return NESTED_CLASS_CACHE.computeIfAbsent(type, t ->
+                Arrays.stream(t.getDeclaredFields())
+                        .anyMatch(f -> f.isAnnotationPresent(CobolField.class)));
     }
 
     /**
      * Calculate the total length of a nested class by summing all its fields.
+     * Result is cached per class to avoid repeated reflection scans.
      */
     private int calculateNestedClassLength(Class<?> clazz) {
-        return Arrays.stream(clazz.getDeclaredFields())
+        Integer cached = NESTED_CLASS_LENGTH_CACHE.get(clazz);
+        if (cached != null) {
+            return cached;
+        }
+        int length = Arrays.stream(clazz.getDeclaredFields())
                 .filter(field -> field.isAnnotationPresent(CobolField.class))
                 .mapToInt(field -> calculateFieldLength(field, field.getAnnotation(CobolField.class)))
                 .sum();
+        NESTED_CLASS_LENGTH_CACHE.put(clazz, length);
+        return length;
     }
 
     /**
      * Create a CobolField annotation with occurs=1 for array element processing.
      */
     private CobolField createSingleOccurField(CobolField original) {
-        return new CobolField() {
-            @Override
-            public Class<? extends java.lang.annotation.Annotation> annotationType() {
-                return CobolField.class;
-            }
-
-            @Override
-            public int level() {
-                return original.level();
-            }
-
-            @Override
-            public String name() {
-                return original.name();
-            }
-
-            @Override
-            public String picture() {
-                return original.picture();
-            }
-
-            @Override
-            public CobolDataType type() {
-                return original.type();
-            }
-
-            @Override
-            public int length() {
-                return original.length();
-            }
-
-            @Override
-            public int integerDigits() {
-                return original.integerDigits();
-            }
-
-            @Override
-            public int decimalDigits() {
-                return original.decimalDigits();
-            }
-
-            @Override
-            public boolean signed() {
-                return original.signed();
-            }
-
-            @Override
-            public String signPosition() {
-                return original.signPosition();
-            }
-
-            @Override
-            public boolean signSeparate() {
-                return original.signSeparate();
-            }
-
-            @Override
-            public int occurs() {
-                return 1;
-            }
-
-            @Override
-            public int minOccurs() {
-                return original.minOccurs();
-            }
-
-            @Override
-            public int maxOccurs() {
-                return original.maxOccurs();
-            }
-
-            @Override
-            public String dependingOn() {
-                return original.dependingOn();
-            }
-
-            @Override
-            public int position() {
-                return original.position();
-            }
-
-            @Override
-            public String redefines() {
-                return original.redefines();
-            }
-
-            @Override
-            public boolean filler() {
-                return original.filler();
-            }
-
-            @Override
-            public String value() {
-                return original.value();
-            }
-
-            @Override
-            public boolean justifiedRight() {
-                return original.justifiedRight();
-            }
-
-            @Override
-            public boolean blankWhenZero() {
-                return original.blankWhenZero();
-            }
-
-            @Override
-            public String sync() {
-                return original.sync();
-            }
-
-            @Override
-            public String[] indexedBy() {
-                return original.indexedBy();
-            }
-
-            @Override
-            public String[] keys() {
-                return original.keys();
-            }
-
-            @Override
-            public boolean ascendingKey() {
-                return original.ascendingKey();
-            }
-
-            @Override
-            public boolean descendingKey() {
-                return original.descendingKey();
-            }
-        };
+        return CobolFieldUtil.withSingleOccur(original);
     }
 
     /**
      * Deserialize DISPLAY field.
      */
     private Object deserializeDisplay(byte[] data, CobolField field, Class<?> targetType, Charset charset) {
+        int typeCategory = classifyType(targetType);
+
         if (field.signed() && field.signSeparate()) {
-            return deserializeDisplayWithSeparateSign(data, field, targetType, charset);
+            return deserializeDisplayWithSeparateSign(data, 0, data.length, field, typeCategory, charset);
         }
 
         if (field.signed() && !field.signSeparate() && isNumericType(targetType)) {
-            return deserializeDisplayWithEmbeddedSign(data, field, targetType, charset);
+            return deserializeDisplayWithEmbeddedSign(data, field, typeCategory, charset);
         }
 
         if (!field.signed() && field.decimalDigits() > 0 && isNumericType(targetType)) {
-            return deserializeDisplayWithImpliedDecimal(data, field, targetType, charset);
+            return deserializeDisplayWithImpliedDecimal(data, field, typeCategory, charset);
         }
 
-        return deserializeDisplayString(data, targetType, charset);
+        return deserializeDisplayString(data, typeCategory, charset);
     }
 
     private boolean isNumericType(Class<?> type) {
@@ -612,22 +521,27 @@ public class CobolDeserializer {
                 type == BigDecimal.class || type == BigInteger.class;
     }
 
-    private Object deserializeDisplayString(byte[] data, Class<?> targetType, Charset charset) {
-        String strValue = new String(data, charset).trim();
+    private static boolean isNumericTypeCategory(int typeCategory) {
+        return typeCategory == TYPE_INT || typeCategory == TYPE_LONG ||
+                typeCategory == TYPE_BIG_DECIMAL || typeCategory == TYPE_BIG_INTEGER;
+    }
 
-        if (targetType == String.class) {
+    private Object deserializeDisplayString(byte[] data, int typeCategory, Charset charset) {
+        String strValue = CobolFieldDeserializer.deserializeDisplayString(data, 0, data.length, charset);
+
+        if (typeCategory == TYPE_STRING) {
             return strValue;
         }
 
         if (strValue.isEmpty()) {
-            return getDefaultValue(targetType);
+            return getDefaultValue(typeCategory);
         }
 
-        return switch (targetType.getSimpleName()) {
-            case "Integer", "int" -> Integer.parseInt(strValue);
-            case "Long", "long" -> Long.parseLong(strValue);
-            case "BigDecimal" -> new BigDecimal(strValue);
-            case "BigInteger" -> new BigInteger(strValue);
+        return switch (typeCategory) {
+            case TYPE_INT -> Integer.parseInt(strValue);
+            case TYPE_LONG -> Long.parseLong(strValue);
+            case TYPE_BIG_DECIMAL -> new BigDecimal(strValue);
+            case TYPE_BIG_INTEGER -> new BigInteger(strValue);
             default -> strValue;
         };
     }
@@ -635,42 +549,43 @@ public class CobolDeserializer {
     /**
      * Deserialize DISPLAY field with implied decimal (V in PIC clause).
      */
-    private Object deserializeDisplayWithImpliedDecimal(byte[] data, CobolField field, Class<?> targetType, Charset charset) {
-        return switch (targetType.getSimpleName()) {
-            case "Integer", "int" -> DisplayNumericUtil.parseUnsignedInt(data, charset, field.decimalDigits());
-            case "Long", "long" -> DisplayNumericUtil.parseUnsignedLong(data, charset, field.decimalDigits());
-            case "BigDecimal" ->
+    private Object deserializeDisplayWithImpliedDecimal(byte[] data, CobolField field, int typeCategory, Charset charset) {
+        return switch (typeCategory) {
+            case TYPE_INT -> DisplayNumericUtil.parseUnsignedInt(data, charset, field.decimalDigits());
+            case TYPE_LONG -> DisplayNumericUtil.parseUnsignedLong(data, charset, field.decimalDigits());
+            case TYPE_BIG_DECIMAL ->
                     DisplayNumericUtil.parseUnsignedWithImpliedDecimal(data, charset, field.decimalDigits());
-            case "BigInteger" ->
+            case TYPE_BIG_INTEGER ->
                     DisplayNumericUtil.parseUnsignedWithImpliedDecimal(data, charset, field.decimalDigits()).toBigInteger();
-            default -> getDefaultValue(targetType);
+            default -> getDefaultValue(typeCategory);
         };
     }
 
     /**
      * Deserialize DISPLAY field with embedded sign (overpunch notation).
      */
-    private Object deserializeDisplayWithEmbeddedSign(byte[] data, CobolField field, Class<?> targetType, Charset charset) {
-        return switch (targetType.getSimpleName()) {
-            case "Integer", "int" -> SignedNumericUtil.parseSignedInt(data, charset);
-            case "Long", "long" -> SignedNumericUtil.parseSignedLong(data, charset);
-            case "BigDecimal" -> SignedNumericUtil.parseSignedBigDecimal(data, charset, field.decimalDigits());
-            case "BigInteger" -> SignedNumericUtil.parseSignedBigDecimal(data, charset, 0).toBigInteger();
-            default -> getDefaultValue(targetType);
+    private Object deserializeDisplayWithEmbeddedSign(byte[] data, CobolField field, int typeCategory, Charset charset) {
+        return switch (typeCategory) {
+            case TYPE_INT -> SignedNumericUtil.parseSignedInt(data, charset);
+            case TYPE_LONG -> SignedNumericUtil.parseSignedLong(data, charset);
+            case TYPE_BIG_DECIMAL -> SignedNumericUtil.parseSignedBigDecimal(data, charset, field.decimalDigits());
+            case TYPE_BIG_INTEGER -> SignedNumericUtil.parseSignedBigDecimal(data, charset, 0).toBigInteger();
+            default -> getDefaultValue(typeCategory);
         };
     }
 
     /**
      * Deserialize DISPLAY field with SIGN LEADING/TRAILING SEPARATE.
      */
-    private Object deserializeDisplayWithSeparateSign(byte[] data, CobolField field, Class<?> targetType, Charset charset) {
-        if (data.length == 0) {
-            return getDefaultValue(targetType);
+    private Object deserializeDisplayWithSeparateSign(byte[] data, int offset, int length,
+                                                     CobolField field, int typeCategory, Charset charset) {
+        if (length == 0) {
+            return getDefaultValue(typeCategory);
         }
 
-        SignAndDigits sad = extractSignAndDigits(data, field, charset);
+        SignAndDigits sad = extractSignAndDigits(data, offset, length, field, charset);
         if (sad.digits.isEmpty()) {
-            return getDefaultValue(targetType);
+            return getDefaultValue(typeCategory);
         }
 
         BigDecimal value = parseBigDecimalValue(sad.digits, field.decimalDigits());
@@ -678,23 +593,39 @@ public class CobolDeserializer {
             value = value.negate();
         }
 
-        return convertToTargetType(value, targetType);
+        return convertToTargetType(value, typeCategory);
     }
 
-    private SignAndDigits extractSignAndDigits(byte[] data, CobolField field, Charset charset) {
+    // Sign byte constants for known charsets
+    private static final byte ASCII_MINUS  = 0x2D;  // '-'
+    private static final byte EBCDIC_MINUS = 0x60;  // '-' in EBCDIC
+
+    private SignAndDigits extractSignAndDigits(byte[] data, int offset, int length, CobolField field, Charset charset) {
         boolean isLeading = "LEADING".equalsIgnoreCase(field.signPosition());
 
-        byte signByte = isLeading ? data[0] : data[data.length - 1];
-        byte[] digitBytes = new byte[data.length - 1];
+        byte signByte = isLeading ? data[offset] : data[offset + length - 1];
 
+        int digitOffset;
+        int digitLength = length - 1;
         if (isLeading) {
-            System.arraycopy(data, 1, digitBytes, 0, digitBytes.length);
+            digitOffset = offset + 1;
         } else {
-            System.arraycopy(data, 0, digitBytes, 0, digitBytes.length);
+            digitOffset = offset;
         }
 
-        boolean isNegative = new String(new byte[]{signByte}, charset).equals("-");
-        String digits = new String(digitBytes, charset).trim();
+        // Detect sign directly from the byte value, avoiding String allocation
+        boolean isNegative;
+        int mode = CharsetMode.detect(charset);
+        if (mode == CharsetMode.ASCII) {
+            isNegative = signByte == ASCII_MINUS;
+        } else if (mode == CharsetMode.EBCDIC) {
+            isNegative = signByte == EBCDIC_MINUS;
+        } else {
+            // Unknown charset fallback: decode the single byte via charset
+            isNegative = new String(new byte[]{signByte}, charset).equals("-");
+        }
+
+        String digits = new String(data, digitOffset, digitLength, charset).trim();
 
         return new SignAndDigits(isNegative, digits);
     }
@@ -706,15 +637,15 @@ public class CobolDeserializer {
         return new BigDecimal(digits);
     }
 
-    private Object convertToTargetType(BigDecimal value, Class<?> targetType) {
-        return switch (targetType.getSimpleName()) {
-            case "BigDecimal" -> value;
-            case "Integer", "int" -> value.intValue();
-            case "Long", "long" -> value.longValue();
-            case "Double", "double" -> value.doubleValue();
-            case "Float", "float" -> value.floatValue();
-            case "BigInteger" -> value.toBigInteger();
-            case "String" -> value.toPlainString();
+    private Object convertToTargetType(BigDecimal value, int typeCategory) {
+        return switch (typeCategory) {
+            case TYPE_BIG_DECIMAL -> value;
+            case TYPE_INT -> value.intValue();
+            case TYPE_LONG -> value.longValue();
+            case TYPE_DOUBLE -> value.doubleValue();
+            case TYPE_FLOAT -> value.floatValue();
+            case TYPE_BIG_INTEGER -> value.toBigInteger();
+            case TYPE_STRING -> value.toPlainString();
             default -> value;
         };
     }
@@ -722,13 +653,13 @@ public class CobolDeserializer {
     /**
      * Get default value for a target type.
      */
-    private Object getDefaultValue(Class<?> targetType) {
-        return switch (targetType.getSimpleName()) {
-            case "String" -> "";
-            case "Integer", "int" -> 0;
-            case "Long", "long" -> 0L;
-            case "BigDecimal" -> BigDecimal.ZERO;
-            case "BigInteger" -> BigInteger.ZERO;
+    private Object getDefaultValue(int typeCategory) {
+        return switch (typeCategory) {
+            case TYPE_STRING -> "";
+            case TYPE_INT -> 0;
+            case TYPE_LONG -> 0L;
+            case TYPE_BIG_DECIMAL -> BigDecimal.ZERO;
+            case TYPE_BIG_INTEGER -> BigInteger.ZERO;
             default -> null;
         };
     }
@@ -737,18 +668,12 @@ public class CobolDeserializer {
      * Deserialize COMP/BINARY field.
      */
     private Object deserializeComp(byte[] data, Class<?> targetType) {
-        ByteBuffer buffer = ByteBuffer.wrap(data);
-
-        long value = switch (data.length) {
-            case 2 -> buffer.getShort();
-            case 4 -> buffer.getInt();
-            default -> buffer.getLong();
-        };
-
-        return switch (targetType.getSimpleName()) {
-            case "Short", "short" -> (short) value;
-            case "Integer", "int" -> (int) value;
-            default -> value;
+        int typeCategory = classifyType(targetType);
+        return switch (typeCategory) {
+            case TYPE_SHORT -> CobolFieldDeserializer.deserializeCompShort(data, 0, data.length);
+            case TYPE_INT -> CobolFieldDeserializer.deserializeCompInteger(data, 0, data.length);
+            case TYPE_BIG_INTEGER -> CobolFieldDeserializer.deserializeCompBigInteger(data, 0, data.length);
+            default -> CobolFieldDeserializer.deserializeCompLong(data, 0, data.length);
         };
     }
 
@@ -756,38 +681,15 @@ public class CobolDeserializer {
      * Deserialize COMP-3 (packed decimal) field.
      */
     private Object deserializeComp3(byte[] data, CobolField field) {
-        BigInteger bigIntValue = extractPackedDecimalValue(data, field);
+        int totalDigits = field.integerDigits() + field.decimalDigits();
 
         if (field.decimalDigits() == 0) {
-            return convertToIntegerType(bigIntValue, field.integerDigits());
+            return convertToIntegerType(
+                    CobolFieldDeserializer.deserializeComp3BigInteger(data, 0, data.length, totalDigits),
+                    field.integerDigits());
         }
 
-        BigDecimal result = new BigDecimal(bigIntValue)
-                .setScale(field.decimalDigits(), RoundingMode.UNNECESSARY)
-                .divide(BigDecimal.TEN.pow(field.decimalDigits()), RoundingMode.UNNECESSARY);
-
-        return result.stripTrailingZeros();
-    }
-
-    private BigInteger extractPackedDecimalValue(byte[] data, CobolField field) {
-        StringBuilder digits = new StringBuilder();
-        int totalDigits = field.integerDigits() + field.decimalDigits();
-        boolean isOddDigits = (totalDigits % 2) != 0;
-
-        for (int i = 0; i < data.length - 1; i++) {
-            digits.append((data[i] >> 4) & 0x0F);
-            digits.append(data[i] & 0x0F);
-        }
-
-        int lastDigit = (data[data.length - 1] >> 4) & 0x0F;
-        int sign = data[data.length - 1] & 0x0F;
-
-        if (isOddDigits) {
-            digits.append(lastDigit);
-        }
-
-        BigInteger value = new BigInteger(digits.toString());
-        return (sign == 0x0D || sign == 0x0B) ? value.negate() : value;
+        return CobolFieldDeserializer.deserializeComp3BigDecimal(data, 0, data.length, totalDigits, field.decimalDigits());
     }
 
     private Object convertToIntegerType(BigInteger value, int integerDigits) {
@@ -800,25 +702,11 @@ public class CobolDeserializer {
      * Deserialize ZONED-DECIMAL field.
      */
     private Object deserializeZonedDecimal(byte[] data, CobolField field) {
-        StringBuilder digits = new StringBuilder();
-
-        for (int i = 0; i < data.length - 1; i++) {
-            digits.append(data[i] & 0x0F);
+        if (field.decimalDigits() > 0) {
+            return CobolFieldDeserializer.deserializeZonedDecimalBigDecimal(data, 0, data.length, field.decimalDigits());
         }
 
-        int lastDigit = data[data.length - 1] & 0x0F;
-        int zone = (data[data.length - 1] >> 4) & 0x0F;
-        digits.append(lastDigit);
-
-        BigDecimal result = new BigDecimal(new BigInteger(digits.toString()))
-                .setScale(field.decimalDigits(), RoundingMode.UNNECESSARY)
-                .divide(BigDecimal.TEN.pow(field.decimalDigits()), RoundingMode.UNNECESSARY);
-
-        if (zone == 0x0D || zone == 0x0B) {
-            result = result.negate();
-        }
-
-        return result.stripTrailingZeros();
+        return CobolFieldDeserializer.deserializeZonedDecimalBigDecimalNoDecimals(data, 0, data.length);
     }
 
     private record SignAndDigits(boolean isNegative, String digits) {

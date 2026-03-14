@@ -20,6 +20,10 @@ public class CobolFieldSerializer {
 
     /**
      * Serialize DISPLAY string.
+     * <p>
+     * For known single-byte charsets (ASCII/EBCDIC), builds the result directly
+     * in a {@code byte[]} with no intermediate String allocations for padding.
+     * For unknown charsets, uses a {@code char[]} to avoid string concatenation.
      */
     public static byte[] serializeDisplayString(Object value, int length, boolean isNumeric, Charset charset) {
         String strValue = value != null ? value.toString() : "";
@@ -30,20 +34,61 @@ public class CobolFieldSerializer {
             return strValue.getBytes(charset);
         }
 
-        if (strLen < length) {
-            int padding = length - strLen;
+        int effectiveLen = Math.min(strLen, length);
+        int mode = CharsetMode.detect(charset);
+
+        if (mode != CharsetMode.UNKNOWN) {
+            byte[] result = new byte[length];
             if (isNumeric) {
-                // Numeric: pad left with zeros
-                strValue = "0".repeat(padding) + strValue;
+                int padding = length - effectiveLen;
+                if (padding > 0) {
+                    byte zeroByte = CharsetMode.zeroByte(mode);
+                    Arrays.fill(result, 0, padding, zeroByte);
+                }
+                byte digitBase = CharsetMode.digitBase(mode);
+                for (int i = 0; i < effectiveLen; i++) {
+                    char c = strValue.charAt(i);
+                    if (c >= '0' && c <= '9') {
+                        result[padding + i] = (byte) (c - '0' + digitBase);
+                    } else {
+                        // Non-digit fallback: encode via charset
+                        byte[] valueBytes = strValue.substring(0, effectiveLen).getBytes(charset);
+                        System.arraycopy(valueBytes, 0, result, padding,
+                                Math.min(valueBytes.length, effectiveLen));
+                        return result;
+                    }
+                }
             } else {
-                // Alphanumeric: pad right with spaces
-                strValue = strValue + " ".repeat(padding);
+                if (effectiveLen > 0) {
+                    byte[] valueBytes = (effectiveLen < strLen)
+                            ? strValue.substring(0, effectiveLen).getBytes(charset)
+                            : strValue.getBytes(charset);
+                    System.arraycopy(valueBytes, 0, result, 0, Math.min(valueBytes.length, effectiveLen));
+                }
+                int remaining = length - effectiveLen;
+                if (remaining > 0) {
+                    byte spaceByte = CharsetMode.spaceByte(mode);
+                    Arrays.fill(result, effectiveLen, length, spaceByte);
+                }
             }
-        } else {
-            strValue = strValue.substring(0, length);
+            return result;
         }
 
-        return strValue.getBytes(charset);
+        // Unknown charset fallback: build in char[] to avoid string concatenation
+        char[] chars = new char[length];
+        if (strLen < length) {
+            if (isNumeric) {
+                int padding = length - strLen;
+                Arrays.fill(chars, 0, padding, '0');
+                strValue.getChars(0, strLen, chars, padding);
+            } else {
+                strValue.getChars(0, strLen, chars, 0);
+                Arrays.fill(chars, strLen, length, ' ');
+            }
+        } else {
+            strValue.getChars(0, length, chars, 0);
+        }
+        return new String(chars).getBytes(charset);
     }
 
     /**
@@ -194,7 +239,18 @@ public class CobolFieldSerializer {
     }
 
     private static String formatUnscaledValueForDigits(BigDecimal absValue, int totalDigits) {
-        return String.format("%0" + totalDigits + "d", absValue.unscaledValue());
+        String digits = absValue.unscaledValue().toString();
+        int padding = totalDigits - digits.length();
+        if (padding <= 0) {
+            return digits;
+        }
+        char[] result = new char[totalDigits];
+        int i = 0;
+        for (; i < padding; i++) {
+            result[i] = '0';
+        }
+        digits.getChars(0, digits.length(), result, i);
+        return new String(result);
     }
 
     /**
@@ -211,8 +267,23 @@ public class CobolFieldSerializer {
         return digits;
     }
 
+    // Sign byte constants for known charsets
+    private static final byte ASCII_PLUS  = 0x2B;  // '+'
+    private static final byte ASCII_MINUS = 0x2D;  // '-'
+    private static final byte EBCDIC_PLUS  = 0x4E;  // '+' in EBCDIC
+    private static final byte EBCDIC_MINUS = 0x60;  // '-' in EBCDIC
+
     private static byte getSignByte(BigDecimal decimal, Charset charset) {
-        char signChar = decimal.signum() >= 0 ? '+' : '-';
+        boolean isNegative = decimal.signum() < 0;
+        int mode = CharsetMode.detect(charset);
+        if (mode == CharsetMode.ASCII) {
+            return isNegative ? ASCII_MINUS : ASCII_PLUS;
+        }
+        if (mode == CharsetMode.EBCDIC) {
+            return isNegative ? EBCDIC_MINUS : EBCDIC_PLUS;
+        }
+        // Unknown charset fallback
+        char signChar = isNegative ? '-' : '+';
         return String.valueOf(signChar).getBytes(charset)[0];
     }
 
@@ -300,19 +371,24 @@ public class CobolFieldSerializer {
                 }
             }
         } else {
-            // Unknown / multi-byte charset – fall back to String-based approach
+            // Unknown / multi-byte charset – build in char[] to avoid string concatenation
+            char[] chars = new char[length];
             if (strLen < length) {
-                int padding = length - strLen;
                 if (isNumeric) {
-                    strValue = "0".repeat(padding) + strValue;
+                    int padding = length - strLen;
+                    Arrays.fill(chars, 0, padding, '0');
+                    strValue.getChars(0, strLen, chars, padding);
                 } else {
-                    strValue = strValue + " ".repeat(padding);
+                    strValue.getChars(0, strLen, chars, 0);
+                    Arrays.fill(chars, strLen, length, ' ');
                 }
             } else if (strLen > length) {
-                strValue = strValue.substring(0, length);
+                strValue.getChars(0, length, chars, 0);
+            } else {
+                strValue.getChars(0, length, chars, 0);
             }
 
-            byte[] bytes = strValue.getBytes(charset);
+            byte[] bytes = new String(chars).getBytes(charset);
             System.arraycopy(bytes, 0, buffer, offset, Math.min(bytes.length, length));
         }
     }

@@ -10,6 +10,15 @@ public class CobolFieldUtil {
     }
 
     /**
+     * Return a {@link CobolField} that delegates all methods to the original
+     * but returns {@code occurs() == 1}. Useful for processing individual
+     * elements of an array field.
+     */
+    public static CobolField withSingleOccur(CobolField original) {
+        return new DelegatingCobolField(original);
+    }
+
+    /**
      * Calculate the byte length of a field.
      */
     public static int calculateFieldLength(CobolField field) {
