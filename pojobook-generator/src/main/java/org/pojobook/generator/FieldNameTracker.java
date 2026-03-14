@@ -24,10 +24,11 @@ public final class FieldNameTracker {
 
     public void reset() {
         currentState = FieldNameState.empty();
+        history.clear();
     }
 
     public void push() {
-        history.push(currentState.snapshot());
+        history.push(currentState);
         currentState = FieldNameState.empty();
     }
 
@@ -52,8 +53,5 @@ public final class FieldNameTracker {
             return new FieldNameState(new HashMap<>(), new HashMap<>());
         }
 
-        FieldNameState snapshot() {
-            return new FieldNameState(new HashMap<>(fieldNameCounts), new HashMap<>(cobolToJavaNameMap));
-        }
     }
 }
