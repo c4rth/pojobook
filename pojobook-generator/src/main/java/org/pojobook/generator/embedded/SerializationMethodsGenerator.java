@@ -11,7 +11,6 @@ import org.pojobook.serializer.CobolFieldSerializer;
 import javax.lang.model.element.Modifier;
 import java.nio.charset.Charset;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Generates serialization methods for COBOL field types.
@@ -270,9 +269,8 @@ public class SerializationMethodsGenerator {
      * Check if picture represents numeric.
      */
     private boolean isNumericPicture(FieldDefinition field) {
-        return Optional.ofNullable(field.getPicture())
-                .map(pic -> pic.startsWith("9") || pic.startsWith("S9"))
-                .orElse(false);
+        String picture = field.getPicture();
+        return picture != null && (picture.startsWith("9") || picture.startsWith("S9"));
     }
 }
 
