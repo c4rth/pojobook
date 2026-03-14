@@ -122,8 +122,14 @@ public class OffsetCalculator {
     private int calculateDisplayLength(FieldDefinition field) {
         int length = field.getIntegerDigits() + field.getDecimalDigits();
         if (length == 0 && field.getPicture() != null) {
-            // Try to calculate from picture
-            length = field.getPicture().replaceAll("[^X9]", "").length();
+            // Fallback: count display characters directly without regex allocations.
+            String picture = field.getPicture();
+            for (int i = 0; i < picture.length(); i++) {
+                char c = picture.charAt(i);
+                if (c == 'X' || c == '9') {
+                    length++;
+                }
+            }
         }
         return length;
     }
