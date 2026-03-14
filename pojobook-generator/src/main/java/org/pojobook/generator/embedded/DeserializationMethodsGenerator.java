@@ -26,7 +26,6 @@ public class DeserializationMethodsGenerator {
     private final FieldNameTracker fieldNameTracker;
     private final OffsetCalculator offsetCalculator;
     private final AbstractPojoGenerator parentGenerator;
-    private int tempVarCounter = 0;
 
     public DeserializationMethodsGenerator(FieldNameTracker fieldNameTracker, OffsetCalculator offsetCalculator, AbstractPojoGenerator parentGenerator) {
         this.fieldNameTracker = fieldNameTracker;
@@ -38,7 +37,7 @@ public class DeserializationMethodsGenerator {
      * Reset temp variable counter.
      */
     public void resetTempVarCounter() {
-        tempVarCounter = 0;
+        // No-op: legacy hook kept for GeneratorContext compatibility.
     }
 
     /**
@@ -222,26 +221,20 @@ public class DeserializationMethodsGenerator {
                 method.addStatement("$L = $T.deserializeDisplayIntegerWithDecimal($L, $L, $L, charset, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
             } else {
-                String tempValue = "strVal_" + (++tempVarCounter);
-                method.addStatement("String $L = $T.deserializeDisplayString($L, $L, $L, charset)",
-                        tempValue, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-                method.addStatement("$L = $L.isEmpty() ? 0 : $T.parseInt($L)", targetRef, tempValue, Integer.class, tempValue);
+                method.addStatement("$L = $T.deserializeDisplayInteger($L, $L, $L, charset)",
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
             }
         } else if (javaType.equals(ClassName.get(Long.class))) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayLongWithDecimal($L, $L, $L, charset, $L)",
                         targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length, decimalDigits);
             } else {
-                String tempValue = "strVal_" + (++tempVarCounter);
-                method.addStatement("String $L = $T.deserializeDisplayString($L, $L, $L, charset)",
-                        tempValue, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-                method.addStatement("$L = $L.isEmpty() ? 0L : $T.parseLong($L)", targetRef, tempValue, Long.class, tempValue);
+                method.addStatement("$L = $T.deserializeDisplayLong($L, $L, $L, charset)",
+                        targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
             }
         } else if (javaType.equals(ClassName.get(Short.class))) {
-            String tempValue = "strVal_" + (++tempVarCounter);
-            method.addStatement("String $L = $T.deserializeDisplayString($L, $L, $L, charset)",
-                    tempValue, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
-            method.addStatement("$L = $L.isEmpty() ? (short) 0 : $T.parseShort($L)", targetRef, tempValue, Short.class, tempValue);
+            method.addStatement("$L = $T.deserializeDisplayShort($L, $L, $L, charset)",
+                    targetRef, CobolFieldDeserializer.class, dataRef, offsetExpr, length);
         } else if (javaType.equals(ClassName.get(BigDecimal.class))) {
             if (decimalDigits > 0) {
                 method.addStatement("$L = $T.deserializeDisplayBigDecimalWithDecimal($L, $L, $L, charset, $L)",

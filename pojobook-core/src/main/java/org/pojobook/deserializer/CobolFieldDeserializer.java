@@ -8,6 +8,7 @@ import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.Locale;
 
 /**
  * Helper class containing COBOL field deserialization methods.
@@ -27,16 +28,81 @@ public class CobolFieldDeserializer {
      * Deserialize a simple DISPLAY numeric field (no decimals).
      */
     public static Integer deserializeDisplayInteger(byte[] data, int offset, int length, Charset charset) {
-        String strValue = new String(data, offset, length, charset).trim();
-        return strValue.isEmpty() ? 0 : Integer.parseInt(strValue);
+        long value = parseUnsignedDisplayLong(data, offset, length, charset);
+        if (value > Integer.MAX_VALUE) {
+            throw new NumberFormatException("For input string: \"" + new String(data, offset, length, charset).trim() + "\"");
+        }
+        return (int) value;
     }
 
     /**
      * Deserialize a simple DISPLAY numeric field (no decimals) to Long.
      */
     public static Long deserializeDisplayLong(byte[] data, int offset, int length, Charset charset) {
-        String strValue = new String(data, offset, length, charset).trim();
-        return strValue.isEmpty() ? 0L : Long.parseLong(strValue);
+        return parseUnsignedDisplayLong(data, offset, length, charset);
+    }
+
+    /**
+     * Deserialize a simple DISPLAY numeric field (no decimals) to Short.
+     */
+    public static Short deserializeDisplayShort(byte[] data, int offset, int length, Charset charset) {
+        long value = parseUnsignedDisplayLong(data, offset, length, charset);
+        if (value > Short.MAX_VALUE) {
+            throw new NumberFormatException("For input string: \"" + new String(data, offset, length, charset).trim() + "\"");
+        }
+        return (short) value;
+    }
+
+    private static long parseUnsignedDisplayLong(byte[] data, int offset, int length, Charset charset) {
+        if (length <= 0) {
+            return 0L;
+        }
+
+        int mode = detectSingleByteNumericMode(charset);
+        if (mode == 0) {
+            String strValue = new String(data, offset, length, charset).trim();
+            return strValue.isEmpty() ? 0L : Long.parseLong(strValue);
+        }
+
+        int asciiSpace = mode == 1 ? 0x20 : 0x40;
+        int digitBase = mode == 1 ? 0x30 : 0xF0;
+
+        int start = offset;
+        int end = offset + length - 1;
+        while (start <= end && (data[start] & 0xFF) == asciiSpace) {
+            start++;
+        }
+        while (end >= start && (data[end] & 0xFF) == asciiSpace) {
+            end--;
+        }
+        if (start > end) {
+            return 0L;
+        }
+
+        long value = 0L;
+        for (int i = start; i <= end; i++) {
+            int b = data[i] & 0xFF;
+            int digit = b - digitBase;
+            if (digit < 0 || digit > 9) {
+                throw new NumberFormatException("For input string: \"" + new String(data, offset, length, charset).trim() + "\"");
+            }
+            if (value > (Long.MAX_VALUE - digit) / 10L) {
+                throw new NumberFormatException("For input string: \"" + new String(data, offset, length, charset).trim() + "\"");
+            }
+            value = value * 10L + digit;
+        }
+        return value;
+    }
+
+    private static int detectSingleByteNumericMode(Charset charset) {
+        String charsetName = charset.name().toUpperCase(Locale.ROOT);
+        if (charsetName.contains("1047") || charsetName.contains("037") || charsetName.contains("EBCDIC")) {
+            return 2;
+        }
+        if (charsetName.contains("ASCII") || charsetName.contains("UTF-8") || charsetName.contains("ISO-8859")) {
+            return 1;
+        }
+        return 0;
     }
 
     /**
