@@ -124,11 +124,11 @@ public class DeserializationMethodsGenerator {
         }
 
         String fieldName = fieldNameTracker.toUniqueFieldName(field);
-        String offsetConstant = "OFFSET_" + fieldName.replace("-", "_").toUpperCase();
+        String offsetConstant = offsetCalculator.offsetConstantName(fieldName);
 
         if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
             // Nested class array
-            String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+            String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
             method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs())
                     .addStatement("$L.$L[i] = $L.deserializeFromBuffer(data, offset + $L + (i * $L), charset)",
                             instanceRef, fieldName, NamingUtils.toPascalCase(field.getName()), offsetConstant, sizeConstant)
@@ -144,7 +144,7 @@ public class DeserializationMethodsGenerator {
             // Simple field or array
             if (field.getOccurs() > 1) {
                 // Array field
-                String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+                String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
                 addFieldDeserializationCode(method, field, instanceRef + "." + fieldName + "[i]",
                         "data", "offset + " + offsetConstant + " + (i * " + sizeConstant + ")");

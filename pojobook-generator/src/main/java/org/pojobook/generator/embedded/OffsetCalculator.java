@@ -17,6 +17,8 @@ import java.util.Map;
 public class OffsetCalculator {
 
     private final Map<FieldDefinition, Integer> fieldSizeCache = new HashMap<>();
+    private final Map<String, String> offsetConstantNameCache = new HashMap<>();
+    private final Map<String, String> sizeConstantNameCache = new HashMap<>();
     private final FieldNameTracker fieldNameTracker;
 
     public OffsetCalculator(FieldNameTracker fieldNameTracker) {
@@ -28,6 +30,16 @@ public class OffsetCalculator {
      */
     public void clearCache() {
         fieldSizeCache.clear();
+        offsetConstantNameCache.clear();
+        sizeConstantNameCache.clear();
+    }
+
+    public String offsetConstantName(String fieldName) {
+        return offsetConstantNameCache.computeIfAbsent(fieldName, name -> "OFFSET_" + toConstantToken(name));
+    }
+
+    public String sizeConstantName(String fieldName) {
+        return sizeConstantNameCache.computeIfAbsent(fieldName, name -> "SIZE_" + toConstantToken(name));
     }
 
     /**
@@ -82,7 +94,7 @@ public class OffsetCalculator {
      * Add an offset constant field.
      */
     private void addOffsetConstant(TypeSpec.Builder builder, String fieldName, int offset) {
-        String constantName = "OFFSET_" + fieldName.replace("-", "_").toUpperCase();
+        String constantName = offsetConstantName(fieldName);
         builder.addField(FieldSpec.builder(int.class, constantName)
                 .addModifiers(Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
                 .initializer("$L", offset)
@@ -93,11 +105,15 @@ public class OffsetCalculator {
      * Add a size constant field.
      */
     private void addSizeConstant(TypeSpec.Builder builder, String fieldName, int size) {
-        String constantName = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+        String constantName = sizeConstantName(fieldName);
         builder.addField(FieldSpec.builder(int.class, constantName)
                 .addModifiers(Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
                 .initializer("$L", size)
                 .build());
+    }
+
+    private String toConstantToken(String fieldName) {
+        return fieldName.replace("-", "_").toUpperCase();
     }
 
     /**

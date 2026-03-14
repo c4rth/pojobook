@@ -114,11 +114,11 @@ public class SerializationMethodsGenerator {
         }
 
         String fieldName = fieldNameTracker.toUniqueFieldName(field);
-        String offsetConstant = "OFFSET_" + fieldName.replace("-", "_").toUpperCase();
+        String offsetConstant = offsetCalculator.offsetConstantName(fieldName);
 
         if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
             // Nested class array - write directly to buffer instead of allocating intermediate arrays
-            String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+            String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
             method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs())
                     .addStatement("$L.$L[i].serializeToBuffer(result, $L + (i * $L), charset)",
                             objectRef, fieldName, offsetConstant, sizeConstant)
@@ -134,7 +134,7 @@ public class SerializationMethodsGenerator {
             // Simple field or array
             if (field.getOccurs() > 1) {
                 // Array field
-                String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+                String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
                 addFieldSerializationCode(method, field, objectRef + "." + fieldName + "[i]",
                         offsetConstant + " + (i * " + sizeConstant + ")", "result");
@@ -158,12 +158,12 @@ public class SerializationMethodsGenerator {
         }
 
         String fieldName = fieldNameTracker.toUniqueFieldName(field);
-        String offsetConstant = "OFFSET_" + fieldName.replace("-", "_").toUpperCase();
+        String offsetConstant = offsetCalculator.offsetConstantName(fieldName);
         String actualOffset = baseOffset + " + " + offsetConstant;
 
         if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
             // Nested class array - write directly to buffer
-            String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+            String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
             method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs())
                     .addStatement("$L.$L[i].serializeToBuffer(buffer, $L + (i * $L), charset)",
                             objectRef, fieldName, actualOffset, sizeConstant)
@@ -179,7 +179,7 @@ public class SerializationMethodsGenerator {
             // Simple field or array
             if (field.getOccurs() > 1) {
                 // Array field
-                String sizeConstant = "SIZE_" + fieldName.replace("-", "_").toUpperCase();
+                String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
                 addFieldSerializationCode(method, field, objectRef + "." + fieldName + "[i]",
                         actualOffset + " + (i * " + sizeConstant + ")", "buffer");
