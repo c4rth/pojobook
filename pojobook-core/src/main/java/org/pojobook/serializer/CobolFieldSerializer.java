@@ -1,5 +1,6 @@
 package org.pojobook.serializer;
 
+import org.pojobook.util.CharsetMode;
 import org.pojobook.util.DisplayNumericUtil;
 import org.pojobook.util.SignedNumericUtil;
 
@@ -8,6 +9,7 @@ import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 
 /**
  * Helper class containing COBOL field serialization methods.
@@ -200,28 +202,85 @@ public class CobolFieldSerializer {
 
     /**
      * Serialize DISPLAY string directly to buffer at specified offset.
-     * This avoids intermediate byte array allocation for better performance.
+     * <p>
+     * For known single-byte charsets (EBCDIC / ASCII), padding bytes and numeric
+     * digit bytes are written directly into the destination buffer without any
+     * intermediate String or byte-array allocation.  Alphanumeric values still
+     * require a {@code getBytes} call for the value portion, but the padding is
+     * written allocation-free.
+     * <p>
+     * For unknown / multi-byte charsets the method falls back to the standard
+     * String-based encoding path.
      */
     public static void serializeDisplayStringDirect(byte[] buffer, int offset, Object value, int length,
                                                     boolean isNumeric, Charset charset) {
         String strValue = value != null ? value.toString() : "";
         int strLen = strValue.length();
+        int effectiveLen = Math.min(strLen, length);
 
-        if (strLen < length) {
-            int padding = length - strLen;
+        int mode = CharsetMode.detect(charset);
+        if (mode != CharsetMode.UNKNOWN) {
             if (isNumeric) {
-                // Numeric: pad left with zeros
-                strValue = "0".repeat(padding) + strValue;
-            } else {
-                // Alphanumeric: pad right with spaces
-                strValue = strValue + " ".repeat(padding);
-            }
-        } else if (strLen > length) {
-            strValue = strValue.substring(0, length);
-        }
+                // Numeric: pad left with '0', then write digits directly – zero allocations
+                int padding = length - effectiveLen;
+                byte digitBase = CharsetMode.digitBase(mode);
 
-        byte[] bytes = strValue.getBytes(charset);
-        System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+                // Leading zero-pad bytes
+                if (padding > 0) {
+                    byte zeroByte = CharsetMode.zeroByte(mode);
+                    Arrays.fill(buffer, offset, offset + padding, zeroByte);
+                }
+
+                // Encode each digit char directly
+                int pos = offset + padding;
+                for (int i = 0; i < effectiveLen; i++) {
+                    char c = strValue.charAt(i);
+                    if (c >= '0' && c <= '9') {
+                        buffer[pos++] = (byte) (c - '0' + digitBase);
+                    } else {
+                        // Non-digit in supposedly numeric field – fall back to charset encoding
+                        byte[] valueBytes = strValue.substring(0, effectiveLen).getBytes(charset);
+                        System.arraycopy(valueBytes, 0, buffer, offset + padding,
+                                Math.min(valueBytes.length, effectiveLen));
+                        return;
+                    }
+                }
+            } else {
+                // Alphanumeric: write value bytes, then pad right with spaces
+                if (effectiveLen > 0) {
+                    if (effectiveLen < strLen) {
+                        // Need to truncate
+                        byte[] valueBytes = strValue.substring(0, effectiveLen).getBytes(charset);
+                        System.arraycopy(valueBytes, 0, buffer, offset, Math.min(valueBytes.length, effectiveLen));
+                    } else {
+                        byte[] valueBytes = strValue.getBytes(charset);
+                        System.arraycopy(valueBytes, 0, buffer, offset, Math.min(valueBytes.length, effectiveLen));
+                    }
+                }
+
+                // Trailing space-pad bytes – no String allocation
+                int remaining = length - effectiveLen;
+                if (remaining > 0) {
+                    byte spaceByte = CharsetMode.spaceByte(mode);
+                    Arrays.fill(buffer, offset + effectiveLen, offset + length, spaceByte);
+                }
+            }
+        } else {
+            // Unknown / multi-byte charset – fall back to String-based approach
+            if (strLen < length) {
+                int padding = length - strLen;
+                if (isNumeric) {
+                    strValue = "0".repeat(padding) + strValue;
+                } else {
+                    strValue = strValue + " ".repeat(padding);
+                }
+            } else if (strLen > length) {
+                strValue = strValue.substring(0, length);
+            }
+
+            byte[] bytes = strValue.getBytes(charset);
+            System.arraycopy(bytes, 0, buffer, offset, Math.min(bytes.length, length));
+        }
     }
 
     /**

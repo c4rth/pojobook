@@ -1,5 +1,6 @@
 package org.pojobook.deserializer;
 
+import org.pojobook.util.CharsetMode;
 import org.pojobook.util.DisplayNumericUtil;
 import org.pojobook.util.SignedNumericUtil;
 
@@ -8,7 +9,6 @@ import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
-import java.util.Locale;
 
 /**
  * Helper class containing COBOL field deserialization methods.
@@ -58,14 +58,14 @@ public class CobolFieldDeserializer {
             return 0L;
         }
 
-        int mode = detectSingleByteNumericMode(charset);
-        if (mode == 0) {
+        int mode = CharsetMode.detect(charset);
+        if (mode == CharsetMode.UNKNOWN) {
             String strValue = new String(data, offset, length, charset).trim();
             return strValue.isEmpty() ? 0L : Long.parseLong(strValue);
         }
 
-        int asciiSpace = mode == 1 ? 0x20 : 0x40;
-        int digitBase = mode == 1 ? 0x30 : 0xF0;
+        int asciiSpace = mode == CharsetMode.ASCII ? 0x20 : 0x40;
+        int digitBase = mode == CharsetMode.ASCII ? 0x30 : 0xF0;
 
         int start = offset;
         int end = offset + length - 1;
@@ -94,16 +94,6 @@ public class CobolFieldDeserializer {
         return value;
     }
 
-    private static int detectSingleByteNumericMode(Charset charset) {
-        String charsetName = charset.name().toUpperCase(Locale.ROOT);
-        if (charsetName.contains("1047") || charsetName.contains("037") || charsetName.contains("EBCDIC")) {
-            return 2;
-        }
-        if (charsetName.contains("ASCII") || charsetName.contains("UTF-8") || charsetName.contains("ISO-8859")) {
-            return 1;
-        }
-        return 0;
-    }
 
     /**
      * Deserialize a simple DISPLAY numeric field (no decimals) to BigDecimal.
