@@ -122,19 +122,19 @@ public class CobolFieldSerializer {
         }
 
         BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
-        String digits = String.format("%0" + totalDigits + "d", biValue.abs().longValue());
+        char[] digits = toZeroPaddedDigits(biValue.abs().longValue(), totalDigits);
 
         int byteLength = (totalDigits / 2) + 1;
         byte[] packed = new byte[byteLength];
 
         int digitIndex = 0;
         for (int i = 0; i < byteLength - 1; i++) {
-            int high = digits.charAt(digitIndex++) - '0';
-            int low = digits.charAt(digitIndex++) - '0';
+            int high = digits[digitIndex++] - '0';
+            int low = digits[digitIndex++] - '0';
             packed[i] = (byte) ((high << 4) | low);
         }
 
-        int lastDigit = (totalDigits % 2 != 0) ? (digits.charAt(digitIndex) - '0') : 0;
+        int lastDigit = (totalDigits % 2 != 0) ? (digits[digitIndex] - '0') : 0;
         int sign = biValue.signum() < 0 ? 0x0D : 0x0C;
         packed[byteLength - 1] = (byte) ((lastDigit << 4) | sign);
 
@@ -152,11 +152,11 @@ public class CobolFieldSerializer {
         }
 
         long longValue = bdValue.setScale(0, RoundingMode.HALF_UP).longValue();
-        String digits = String.format("%0" + totalDigits + "d", Math.abs(longValue));
+        char[] digits = toZeroPaddedDigits(Math.abs(longValue), totalDigits);
         byte[] zoned = new byte[totalDigits];
 
         for (int i = 0; i < totalDigits; i++) {
-            byte digit = (byte) (digits.charAt(i) - '0');
+            byte digit = (byte) (digits[i] - '0');
             if (i == totalDigits - 1 && signed) {
                 zoned[i] = (byte) ((longValue < 0 ? 0xD0 : 0xC0) | digit);
             } else {
@@ -195,6 +195,20 @@ public class CobolFieldSerializer {
 
     private static String formatUnscaledValueForDigits(BigDecimal absValue, int totalDigits) {
         return String.format("%0" + totalDigits + "d", absValue.unscaledValue());
+    }
+
+    /**
+     * Convert a non-negative long value into a zero-padded char array of the given length.
+     * Uses modular arithmetic instead of {@code String.format}, avoiding format-string
+     * parsing, varargs boxing, and intermediate String allocation.
+     */
+    private static char[] toZeroPaddedDigits(long absValue, int length) {
+        char[] digits = new char[length];
+        for (int i = length - 1; i >= 0; i--) {
+            digits[i] = (char) ('0' + (int) (absValue % 10));
+            absValue /= 10;
+        }
+        return digits;
     }
 
     private static byte getSignByte(BigDecimal decimal, Charset charset) {
@@ -434,18 +448,18 @@ public class CobolFieldSerializer {
 
     private static void packComp3IntoBuffer(byte[] buffer, int offset, BigDecimal bdValue, int totalDigits) {
         BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
-        String digits = String.format("%0" + totalDigits + "d", biValue.abs().longValue());
+        char[] digits = toZeroPaddedDigits(biValue.abs().longValue(), totalDigits);
 
         int byteLength = (totalDigits / 2) + 1;
         int digitIndex = 0;
 
         for (int i = 0; i < byteLength - 1; i++) {
-            int high = digits.charAt(digitIndex++) - '0';
-            int low = digits.charAt(digitIndex++) - '0';
+            int high = digits[digitIndex++] - '0';
+            int low = digits[digitIndex++] - '0';
             buffer[offset + i] = (byte) ((high << 4) | low);
         }
 
-        int lastDigit = (totalDigits % 2 != 0) ? (digits.charAt(digitIndex) - '0') : 0;
+        int lastDigit = (totalDigits % 2 != 0) ? (digits[digitIndex] - '0') : 0;
         int sign = biValue.signum() < 0 ? 0x0D : 0x0C;
         buffer[offset + byteLength - 1] = (byte) ((lastDigit << 4) | sign);
     }
@@ -484,10 +498,10 @@ public class CobolFieldSerializer {
     private static void writeZonedDecimalToBuffer(byte[] buffer, int offset, BigDecimal bdValue,
                                                    int totalDigits, boolean signed) {
         long longValue = bdValue.setScale(0, RoundingMode.HALF_UP).longValue();
-        String digits = String.format("%0" + totalDigits + "d", Math.abs(longValue));
+        char[] digits = toZeroPaddedDigits(Math.abs(longValue), totalDigits);
 
         for (int i = 0; i < totalDigits; i++) {
-            byte digit = (byte) (digits.charAt(i) - '0');
+            byte digit = (byte) (digits[i] - '0');
             if (i == totalDigits - 1 && signed) {
                 buffer[offset + i] = (byte) ((longValue < 0 ? 0xD0 : 0xC0) | digit);
             } else {
