@@ -73,6 +73,12 @@ class GenerateMojoEmbeddedTest {
                 "Embedded generator should not use @CobolRecord annotation");
 
         // Verify embedded methods exist
+        assertTrue(content.contains("public int serializedSize()"),
+                "Should expose record serialized size");
+        assertTrue(content.contains("public void serialize(byte[] buffer)"),
+                "Should have serialize(byte[]) overload for buffer reuse");
+        assertTrue(content.contains("public void serialize(byte[] buffer, int offset)"),
+                "Should have serialize(byte[], int) overload for buffer reuse");
         assertTrue(content.contains("public byte[] serialize(Charset charset)"),
                 "Should have embedded serialize() method");
         assertTrue(content.contains("public static EmployeeRecord deserialize(byte[] data, Charset charset)"),

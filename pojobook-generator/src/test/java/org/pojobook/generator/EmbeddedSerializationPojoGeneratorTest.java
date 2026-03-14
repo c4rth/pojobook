@@ -53,6 +53,9 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("hireDate"));
 
         // Check for serialization methods
+        assertTrue(generatedCode.contains("public int serializedSize()"));
+        assertTrue(generatedCode.contains("public void serialize(byte[] buffer)"));
+        assertTrue(generatedCode.contains("public void serialize(byte[] buffer, int offset)"));
         assertTrue(generatedCode.contains("public byte[] serialize(Charset charset)"));
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
 
@@ -95,6 +98,9 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("for (int i = 0; i < 12; i++)"));
 
         // Check for serialization methods
+        assertTrue(generatedCode.contains("public int serializedSize()"));
+        assertTrue(generatedCode.contains("public void serialize(byte[] buffer)"));
+        assertTrue(generatedCode.contains("public void serialize(byte[] buffer, int offset)"));
         assertTrue(generatedCode.contains("public byte[] serialize(Charset charset)"));
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
     }
@@ -168,6 +174,9 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("package org.pojobook.generated"));
 
         // Check for serialization methods
+        assertTrue(generatedCode.contains("public int serializedSize()"));
+        assertTrue(generatedCode.contains("public void serialize(byte[] buffer)"));
+        assertTrue(generatedCode.contains("public void serialize(byte[] buffer, int offset)"));
         assertTrue(generatedCode.contains("public byte[] serialize(Charset charset)"));
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
 

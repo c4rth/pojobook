@@ -32,9 +32,22 @@ public class SerializationMethodsGenerator {
         // Calculate total size for pre-allocation
         int totalSize = offsetCalculator.calculateNestedClassSize(fieldTree);
 
+        addSerializedSizeMethod(builder, totalSize);
         addSerializeWithDefaultCharset(builder);
+        addSerializeIntoBufferOverloads(builder);
         addSerializeWithCharset(builder, fieldTree, totalSize);
         addSerializeToBuffer(builder, fieldTree);
+    }
+
+    private void addSerializedSizeMethod(TypeSpec.Builder builder, int totalSize) {
+        MethodSpec method = MethodSpec.methodBuilder("serializedSize")
+                .addModifiers(Modifier.PUBLIC)
+                .returns(int.class)
+                .addJavadoc("Return the serialized record size in bytes.\n")
+                .addStatement("return $L", totalSize)
+                .build();
+
+        builder.addMethod(method);
     }
 
     private void addSerializeWithDefaultCharset(TypeSpec.Builder builder) {
@@ -51,6 +64,33 @@ public class SerializationMethodsGenerator {
         builder.addMethod(method);
     }
 
+    private void addSerializeIntoBufferOverloads(TypeSpec.Builder builder) {
+        MethodSpec serializeWithDefaultCharset = MethodSpec.methodBuilder("serialize")
+                .addModifiers(Modifier.PUBLIC)
+                .addParameter(byte[].class, "buffer")
+                .addException(SerializationException.class)
+                .addJavadoc("Serialize this object into a caller-provided buffer using CP1047 charset.\n")
+                .addJavadoc("@param buffer destination byte array\n")
+                .addJavadoc("@throws SerializationException if serialization fails\n")
+                .addStatement("this.serialize(buffer, 0)")
+                .build();
+
+        MethodSpec serializeWithOffset = MethodSpec.methodBuilder("serialize")
+                .addModifiers(Modifier.PUBLIC)
+                .addParameter(byte[].class, "buffer")
+                .addParameter(int.class, "offset")
+                .addException(SerializationException.class)
+                .addJavadoc("Serialize this object into a caller-provided buffer using CP1047 charset.\n")
+                .addJavadoc("@param buffer destination byte array\n")
+                .addJavadoc("@param offset starting position in the buffer\n")
+                .addJavadoc("@throws SerializationException if serialization fails\n")
+                .addStatement("this.serializeToBuffer(buffer, offset, CHARSET_CP1047)")
+                .build();
+
+        builder.addMethod(serializeWithDefaultCharset);
+        builder.addMethod(serializeWithOffset);
+    }
+
     private void addSerializeWithCharset(TypeSpec.Builder builder, List<FieldNode> fieldTree, int totalSize) {
         MethodSpec.Builder method = MethodSpec.methodBuilder("serialize")
                 .addModifiers(Modifier.PUBLIC)
@@ -61,17 +101,9 @@ public class SerializationMethodsGenerator {
                 .addJavadoc("@return byte array containing the serialized data\n")
                 .addJavadoc("@throws SerializationException if an I/O error occurs\n");
 
-        method.beginControlFlow("try")
-                .addStatement("byte[] result = new byte[$L]", totalSize);
-
-        for (FieldNode node : fieldTree) {
-            addSerializationCode(method, node, "this");
-        }
-
-        method.addStatement("return result")
-                .nextControlFlow("catch ($T e)", Exception.class)
-                .addStatement("throw new $T(\"Serialization failed\", e)", SerializationException.class)
-                .endControlFlow();
+        method.addStatement("byte[] result = new byte[$L]", totalSize)
+                .addStatement("this.serializeToBuffer(result, 0, charset)")
+                .addStatement("return result");
 
         builder.addMethod(method.build());
     }
