@@ -35,7 +35,7 @@ public class SerializationMethodsGenerator {
         addSerializedSizeMethod(builder, totalSize);
         addSerializeWithDefaultCharset(builder);
         addSerializeIntoBufferOverloads(builder);
-        addSerializeWithCharset(builder, fieldTree, totalSize);
+        addSerializeWithCharset(builder, totalSize);
         addSerializeToBuffer(builder, fieldTree);
     }
 
@@ -91,7 +91,7 @@ public class SerializationMethodsGenerator {
         builder.addMethod(serializeWithOffset);
     }
 
-    private void addSerializeWithCharset(TypeSpec.Builder builder, List<FieldNode> fieldTree, int totalSize) {
+    private void addSerializeWithCharset(TypeSpec.Builder builder, int totalSize) {
         MethodSpec.Builder method = MethodSpec.methodBuilder("serialize")
                 .addModifiers(Modifier.PUBLIC)
                 .addParameter(Charset.class, "charset")
@@ -135,50 +135,6 @@ public class SerializationMethodsGenerator {
     }
 
     /**
-     * Add serialization code for a field using pre-computed offsets.
-     */
-    private void addSerializationCode(MethodSpec.Builder method, FieldNode node, String objectRef) {
-        FieldDefinition field = node.getField();
-
-        // Skip 88-level condition names - they are not serialized
-        if (field.getLevel() == 88) {
-            return;
-        }
-
-        String fieldName = fieldNameTracker.toUniqueFieldName(field);
-        String offsetConstant = offsetCalculator.offsetConstantName(fieldName);
-
-        if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
-            // Nested class array - write directly to buffer instead of allocating intermediate arrays
-            String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
-            method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs())
-                    .addStatement("$L.$L[i].serializeToBuffer(result, $L + (i * $L), charset)",
-                            objectRef, fieldName, offsetConstant, sizeConstant)
-                    .endControlFlow();
-
-        } else if (field.isGroup() && field.getOccurs() == 1 && !node.getChildren().isEmpty()) {
-            // Flattened group
-            for (FieldNode child : node.getChildren()) {
-                addSerializationCode(method, child, objectRef);
-            }
-
-        } else {
-            // Simple field or array
-            if (field.getOccurs() > 1) {
-                // Array field
-                String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
-                method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
-                addFieldSerializationCode(method, field, objectRef + "." + fieldName + "[i]",
-                        offsetConstant + " + (i * " + sizeConstant + ")", "result");
-                method.endControlFlow();
-            } else {
-                // Single field
-                addFieldSerializationCode(method, field, objectRef + "." + fieldName, offsetConstant, "result");
-            }
-        }
-    }
-
-    /**
      * Add serialization code for a field to a buffer at given offset (for nested classes).
      */
     private void addSerializationCodeToBuffer(MethodSpec.Builder method, FieldNode node, String objectRef, String baseOffset) {
@@ -196,9 +152,14 @@ public class SerializationMethodsGenerator {
         if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
             // Nested class array - write directly to buffer
             String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
+            String baseOffsetVar = fieldName + "BaseOffset";
+            String posVar = fieldName + "Pos";
+            method.addStatement("int $L = $L", baseOffsetVar, actualOffset)
+                    .addStatement("int $L = $L", posVar, baseOffsetVar);
             method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs())
-                    .addStatement("$L.$L[i].serializeToBuffer(buffer, $L + (i * $L), charset)",
-                            objectRef, fieldName, actualOffset, sizeConstant)
+                    .addStatement("$L.$L[i].serializeToBuffer(buffer, $L, charset)",
+                            objectRef, fieldName, posVar)
+                    .addStatement("$L += $L", posVar, sizeConstant)
                     .endControlFlow();
 
         } else if (field.isGroup() && field.getOccurs() == 1 && !node.getChildren().isEmpty()) {
@@ -212,9 +173,14 @@ public class SerializationMethodsGenerator {
             if (field.getOccurs() > 1) {
                 // Array field
                 String sizeConstant = offsetCalculator.sizeConstantName(fieldName);
+                String baseOffsetVar = fieldName + "BaseOffset";
+                String posVar = fieldName + "Pos";
+                method.addStatement("int $L = $L", baseOffsetVar, actualOffset)
+                        .addStatement("int $L = $L", posVar, baseOffsetVar);
                 method.beginControlFlow("for (int i = 0; i < $L; i++)", field.getOccurs());
                 addFieldSerializationCode(method, field, objectRef + "." + fieldName + "[i]",
-                        actualOffset + " + (i * " + sizeConstant + ")", "buffer");
+                        posVar, "buffer");
+                method.addStatement("$L += $L", posVar, sizeConstant);
                 method.endControlFlow();
             } else {
                 // Single field

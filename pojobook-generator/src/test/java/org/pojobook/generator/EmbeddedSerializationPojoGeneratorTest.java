@@ -96,6 +96,9 @@ class EmbeddedSerializationPojoGeneratorTest {
 
         // Check for array handling in serialization
         assertTrue(generatedCode.contains("for (int i = 0; i < 12; i++)"));
+        assertTrue(generatedCode.contains("int monthlySalesBaseOffset = offset + OFFSET_MONTHLYSALES;"));
+        assertTrue(generatedCode.contains("int monthlySalesPos = monthlySalesBaseOffset;"));
+        assertTrue(generatedCode.contains("monthlySalesPos += SIZE_MONTHLYSALES;"));
 
         // Check for serialization methods
         assertTrue(generatedCode.contains("public int serializedSize()"));
@@ -141,6 +144,9 @@ class EmbeddedSerializationPojoGeneratorTest {
 
         // Check for array of nested class
         assertTrue(generatedCode.contains("Department[]"));
+        assertTrue(generatedCode.contains("int departmentBaseOffset = offset + OFFSET_DEPARTMENT;"));
+        assertTrue(generatedCode.contains("int departmentPos = departmentBaseOffset;"));
+        assertTrue(generatedCode.contains("departmentPos += SIZE_DEPARTMENT;"));
 
         // Check for serialization in nested class
         assertTrue(generatedCode.contains("Department.deserializeFromBuffer(data,"));
