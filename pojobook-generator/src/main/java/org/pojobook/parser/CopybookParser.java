@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
@@ -76,6 +77,7 @@ public class CopybookParser {
     }
 
     private static final Pattern QUOTED_VALUE_PATTERN = Pattern.compile("(['\"])([^'\"]*?)\\1");
+    private static final Clause[] CLAUSES = Clause.values();
 
     /**
      * Parse a COBOL copybook from a string.
@@ -160,7 +162,11 @@ public class CopybookParser {
         field.setLineNumber(lineNumber);
         field.setFiller("FILLER".equalsIgnoreCase(field.getName()));
 
-        for (Clause clause : Clause.values()) {
+        String normalizedLine = line.toUpperCase(Locale.ROOT);
+        for (Clause clause : CLAUSES) {
+            if (!mightContainClause(normalizedLine, clause)) {
+                continue;
+            }
             Matcher clauseMatcher = clause.pattern.matcher(line);
             if (clauseMatcher.find()) {
                 clause.processor.accept(field, clauseMatcher);
@@ -168,6 +174,31 @@ public class CopybookParser {
         }
 
         return field;
+    }
+
+    private boolean mightContainClause(String normalizedLine, Clause clause) {
+        return switch (clause) {
+            case PICTURE -> normalizedLine.contains("PIC");
+            case REDEFINES -> normalizedLine.contains("REDEFINES");
+            case OCCURS -> normalizedLine.contains("OCCURS");
+            case VALUE -> normalizedLine.contains("VALUE");
+            case USAGE -> containsUsageToken(normalizedLine);
+            case SYNC -> normalizedLine.contains("SYNC");
+            case INDEXED_BY -> normalizedLine.contains("INDEXED");
+            case KEY -> normalizedLine.contains("KEY");
+            case SIGN -> normalizedLine.contains("SIGN");
+            case JUSTIFIED -> normalizedLine.contains("JUST");
+            case BLANK_WHEN_ZERO -> normalizedLine.contains("BLANK");
+        };
+    }
+
+    private boolean containsUsageToken(String normalizedLine) {
+        return normalizedLine.contains("USAGE")
+                || normalizedLine.contains("COMP")
+                || normalizedLine.contains("COMPUTATIONAL")
+                || normalizedLine.contains("PACKED-DECIMAL")
+                || normalizedLine.contains("BINARY")
+                || normalizedLine.contains("DISPLAY");
     }
 
     private FieldDefinition createConditionField(int lineNumber, Matcher conditionMatcher) {
