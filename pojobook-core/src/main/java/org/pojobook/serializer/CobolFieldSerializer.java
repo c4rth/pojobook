@@ -285,21 +285,22 @@ public class CobolFieldSerializer {
 
     /**
      * Serialize DISPLAY field with implied decimal directly to buffer.
+     * Delegates to the direct-write overload, avoiding intermediate byte[] allocation
+     * for known single-byte charsets.
      */
     public static void serializeDisplayWithImpliedDecimalDirect(byte[] buffer, int offset, Number value,
                                                                 int length, int decimalDigits, Charset charset) {
-        byte[] bytes = DisplayNumericUtil.formatUnsignedWithImpliedDecimal(value, length, decimalDigits, charset);
-        System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+        DisplayNumericUtil.formatUnsignedWithImpliedDecimalDirect(buffer, offset, value, length, decimalDigits, charset);
     }
 
     /**
      * Serialize DISPLAY field with embedded sign directly to buffer.
+     * Delegates to the direct-write overload, avoiding intermediate String and byte[]
+     * allocation for known single-byte charsets.
      */
     public static void serializeDisplayWithEmbeddedSignDirect(byte[] buffer, int offset, Number value,
                                                               int length, int decimalDigits, Charset charset) {
-        String formatted = SignedNumericUtil.formatSignedNumeric(value, length, decimalDigits);
-        byte[] bytes = formatted.getBytes(charset);
-        System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+        SignedNumericUtil.formatSignedNumericDirect(buffer, offset, value, length, decimalDigits, charset);
     }
 
     /**

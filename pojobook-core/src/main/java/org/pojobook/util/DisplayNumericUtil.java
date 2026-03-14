@@ -129,6 +129,40 @@ public final class DisplayNumericUtil {
     }
 
     /**
+     * Format an unsigned numeric value and write it directly into a destination buffer
+     * in COBOL DISPLAY format with implied decimal.
+     * <p>
+     * For known single-byte charsets (EBCDIC / ASCII) digits are written byte-by-byte
+     * without any intermediate String or byte-array allocation.  For unknown charsets the
+     * method falls back to the standard {@code getBytes} encoding path.
+     *
+     * @param buffer        destination byte array
+     * @param offset        starting position in the buffer
+     * @param value         the numeric value to format
+     * @param length        the total field length (integer digits + decimal digits)
+     * @param decimalDigits number of decimal digits
+     * @param charset       the character encoding
+     */
+    public static void formatUnsignedWithImpliedDecimalDirect(byte[] buffer, int offset,
+                                                              Number value, int length,
+                                                              int decimalDigits, Charset charset) {
+        String digits = formatUnsignedNumericString(value, length, decimalDigits);
+
+        int mode = CharsetMode.detect(charset);
+        if (mode != CharsetMode.UNKNOWN) {
+            // Single-byte charset fast path – write digits directly, zero allocation
+            byte digitBase = CharsetMode.digitBase(mode);
+            for (int i = 0; i < digits.length(); i++) {
+                buffer[offset + i] = (byte) (digits.charAt(i) - '0' + digitBase);
+            }
+        } else {
+            // Unknown / multi-byte charset – fall back to standard encoding
+            byte[] bytes = digits.getBytes(charset);
+            System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+        }
+    }
+
+    /**
      * Format an unsigned numeric value to string with implied decimal (for generated code).
      *
      * @param value         the numeric value to format

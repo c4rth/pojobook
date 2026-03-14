@@ -3,6 +3,7 @@ package org.pojobook.util;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 
 /**
  * Utility class for handling signed numeric DISPLAY fields with embedded signs (overpunch).
@@ -135,6 +136,80 @@ public final class SignedNumericUtil {
         char overpunch = getOverpunchChar(lastDigit - '0', isNegative);
 
         return digits.substring(0, digits.length() - 1) + overpunch;
+    }
+
+    // EBCDIC overpunch byte values: positive digit d → 0xC0+d, negative digit d → 0xD0+d
+    private static final byte[] EBCDIC_POSITIVE_OVERPUNCH = {
+            (byte) 0xC0, (byte) 0xC1, (byte) 0xC2, (byte) 0xC3, (byte) 0xC4,
+            (byte) 0xC5, (byte) 0xC6, (byte) 0xC7, (byte) 0xC8, (byte) 0xC9
+    };
+    private static final byte[] EBCDIC_NEGATIVE_OVERPUNCH = {
+            (byte) 0xD0, (byte) 0xD1, (byte) 0xD2, (byte) 0xD3, (byte) 0xD4,
+            (byte) 0xD5, (byte) 0xD6, (byte) 0xD7, (byte) 0xD8, (byte) 0xD9
+    };
+
+    /**
+     * Format a numeric value with overpunched sign and write it directly into a
+     * destination buffer.
+     * <p>
+     * For known single-byte charsets (EBCDIC / ASCII) all digit bytes and the
+     * trailing overpunch byte are written directly without any intermediate
+     * String or byte-array allocation.  For unknown charsets the method falls
+     * back to the standard {@code getBytes} encoding path.
+     *
+     * @param buffer        destination byte array
+     * @param offset        starting position in the buffer
+     * @param value         the numeric value to format
+     * @param length        the total field length (number of digits)
+     * @param decimalDigits number of implied decimal digits
+     * @param charset       the character encoding
+     */
+    public static void formatSignedNumericDirect(byte[] buffer, int offset,
+                                                 Object value, int length,
+                                                 int decimalDigits, Charset charset) {
+        int mode = CharsetMode.detect(charset);
+
+        if (value == null) {
+            if (mode != CharsetMode.UNKNOWN) {
+                byte zeroByte = CharsetMode.zeroByte(mode);
+                Arrays.fill(buffer, offset, offset + length, zeroByte);
+            } else {
+                byte[] bytes = padWithZeros("0", length).getBytes(charset);
+                System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+            }
+            return;
+        }
+
+        BigDecimal bdValue = toBigDecimal(value);
+        boolean isNegative = bdValue.signum() < 0;
+        String digits = formatAsUnscaledDigits(bdValue.abs(), length, decimalDigits);
+        int lastDigitValue = digits.charAt(digits.length() - 1) - '0';
+
+        if (mode != CharsetMode.UNKNOWN) {
+            // Single-byte charset fast path – write digit bytes directly
+            byte digitBase = CharsetMode.digitBase(mode);
+            for (int i = 0; i < digits.length() - 1; i++) {
+                buffer[offset + i] = (byte) (digits.charAt(i) - '0' + digitBase);
+            }
+
+            // Write overpunch byte for the last digit
+            if (mode == CharsetMode.EBCDIC) {
+                buffer[offset + length - 1] = isNegative
+                        ? EBCDIC_NEGATIVE_OVERPUNCH[lastDigitValue]
+                        : EBCDIC_POSITIVE_OVERPUNCH[lastDigitValue];
+            } else {
+                // ASCII: overpunch chars are in the 7-bit ASCII range, cast directly
+                buffer[offset + length - 1] = (byte) (isNegative
+                        ? NEGATIVE_OVERPUNCH[lastDigitValue]
+                        : POSITIVE_OVERPUNCH[lastDigitValue]);
+            }
+        } else {
+            // Unknown / multi-byte charset – fall back to standard encoding
+            char overpunch = getOverpunchChar(lastDigitValue, isNegative);
+            String formatted = digits.substring(0, digits.length() - 1) + overpunch;
+            byte[] bytes = formatted.getBytes(charset);
+            System.arraycopy(bytes, 0, buffer, offset, bytes.length);
+        }
     }
 
     private static <T> T parseNumber(byte[] data, Charset charset, int decimalDigits,
