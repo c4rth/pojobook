@@ -106,7 +106,7 @@ public class DeserializationMethodsGenerator {
 
         method.addStatement("return instance")
                 .nextControlFlow("catch ($T e)", Exception.class)
-                .addStatement("throw new $T(\"Serialization failed\", e)", DeserializationException.class)
+                .addStatement("throw new $T(\"Deserialization failed\", e)", DeserializationException.class)
                 .endControlFlow();
 
         builder.addMethod(method.build());
