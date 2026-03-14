@@ -58,6 +58,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("public void serialize(byte[] buffer, int offset)"));
         assertTrue(generatedCode.contains("public byte[] serialize(Charset charset)"));
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
+        assertFalse(generatedCode.contains("catch (Exception e)"));
 
         // Check that there are NO annotations
         assertFalse(generatedCode.contains("@CobolField"));
@@ -106,6 +107,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("public void serialize(byte[] buffer, int offset)"));
         assertTrue(generatedCode.contains("public byte[] serialize(Charset charset)"));
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
+        assertFalse(generatedCode.contains("catch (Exception e)"));
     }
 
     @Test
@@ -185,6 +187,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(generatedCode.contains("public void serialize(byte[] buffer, int offset)"));
         assertTrue(generatedCode.contains("public byte[] serialize(Charset charset)"));
         assertTrue(generatedCode.contains("deserialize(byte[] data, Charset charset)"));
+        assertFalse(generatedCode.contains("catch (Exception e)"));
 
         // Check for no annotations
         assertFalse(generatedCode.contains("@CobolField"));

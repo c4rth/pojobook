@@ -121,15 +121,10 @@ public class SerializationMethodsGenerator {
                 .addJavadoc("@param charset character encoding\n")
                 .addJavadoc("@throws SerializationException if an I/O error occurs\n");
 
-        method.beginControlFlow("try");
-
         for (FieldNode node : fieldTree) {
             addSerializationCodeToBuffer(method, node, "this", "offset");
         }
 
-        method.nextControlFlow("catch ($T e)", Exception.class)
-                .addStatement("throw new $T(\"Serialization failed\", e)", SerializationException.class)
-                .endControlFlow();
 
         builder.addMethod(method.build());
     }

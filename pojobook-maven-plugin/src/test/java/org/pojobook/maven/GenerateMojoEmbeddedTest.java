@@ -83,6 +83,8 @@ class GenerateMojoEmbeddedTest {
                 "Should have embedded serialize() method");
         assertTrue(content.contains("public static EmployeeRecord deserialize(byte[] data, Charset charset)"),
                 "Should have embedded deserialize() method");
+        assertFalse(content.contains("catch (Exception e)"),
+                "Embedded generator should not emit blanket catch(Exception) in hot paths");
     }
 
 

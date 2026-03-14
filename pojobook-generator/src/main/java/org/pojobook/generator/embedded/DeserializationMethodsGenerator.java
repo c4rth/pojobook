@@ -97,17 +97,13 @@ public class DeserializationMethodsGenerator {
                 .addJavadoc("@return deserialized instance\n")
                 .addJavadoc("@throws DeserializationException if deserialization fails\n");
 
-        method.beginControlFlow("try")
-                .addStatement("$L instance = new $L()", className, className);
+        method.addStatement("$L instance = new $L()", className, className);
 
         for (FieldNode node : fieldTree) {
             addDeserializationCode(method, node, "instance");
         }
 
-        method.addStatement("return instance")
-                .nextControlFlow("catch ($T e)", Exception.class)
-                .addStatement("throw new $T(\"Deserialization failed\", e)", DeserializationException.class)
-                .endControlFlow();
+        method.addStatement("return instance");
 
         builder.addMethod(method.build());
     }
