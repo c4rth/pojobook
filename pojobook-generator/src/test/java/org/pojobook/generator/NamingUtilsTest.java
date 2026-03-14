@@ -15,6 +15,9 @@ public class NamingUtilsTest {
         assertEquals("customerId", NamingUtils.toCamelCase("CUSTOMER_ID"));
         assertEquals("orderDetails", NamingUtils.toCamelCase("ORDER_DETAILS"));
         assertEquals("customerId", NamingUtils.toCamelCase("-CUSTOMER-ID"));
+        assertEquals("customerId", NamingUtils.toCamelCase("CUSTOMER--ID"));
+        assertEquals("customerId", NamingUtils.toCamelCase("CUSTOMER-ID-"));
+        assertEquals("", NamingUtils.toCamelCase("---___"));
     }
 
     @Test
@@ -26,6 +29,9 @@ public class NamingUtilsTest {
         assertEquals("CustomerId", NamingUtils.toPascalCase("CUSTOMER_ID"));
         assertEquals("OrderDetails", NamingUtils.toPascalCase("ORDER_DETAILS"));
         assertEquals("CustomerId", NamingUtils.toPascalCase("-CUSTOMER-ID"));
+        assertEquals("CustomerId", NamingUtils.toPascalCase("CUSTOMER--ID"));
+        assertEquals("CustomerId", NamingUtils.toPascalCase("CUSTOMER-ID-"));
+        assertEquals("", NamingUtils.toPascalCase("---___"));
     }
 
 }

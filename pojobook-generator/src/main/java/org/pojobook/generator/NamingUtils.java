@@ -1,5 +1,7 @@
 package org.pojobook.generator;
 
+import java.util.Locale;
+
 /**
  * Utility class for name transformations.
  */
@@ -27,21 +29,42 @@ public final class NamingUtils {
      * Generic name transformation.
      */
     private static String transformName(String name, boolean capitalizeFirst) {
-        String[] parts = stripLeadingDelimiters(name).split("[-_]");
-        if (parts.length == 0) return "";
+        String normalized = stripLeadingDelimiters(name);
+        if (normalized.isEmpty()) {
+            return "";
+        }
 
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < parts.length; i++) {
-            String part = parts[i];
-            if (part.isEmpty()) continue;
+        StringBuilder result = new StringBuilder(normalized.length());
+        StringBuilder token = new StringBuilder();
+        boolean firstToken = true;
 
-            if (i == 0 && !capitalizeFirst) {
-                result.append(part.toLowerCase());
+        for (int i = 0; i < normalized.length(); i++) {
+            char c = normalized.charAt(i);
+            if (c == '-' || c == '_') {
+                if (!token.isEmpty()) {
+                    appendToken(result, token, firstToken && !capitalizeFirst);
+                    firstToken = false;
+                    token.setLength(0);
+                }
             } else {
-                result.append(capitalizeFirst(part.toLowerCase()));
+                token.append(c);
             }
         }
+
+        if (!token.isEmpty()) {
+            appendToken(result, token, firstToken && !capitalizeFirst);
+        }
+
         return result.toString();
+    }
+
+    private static void appendToken(StringBuilder result, StringBuilder token, boolean lowercaseOnly) {
+        String part = token.toString().toLowerCase(Locale.ROOT);
+        if (lowercaseOnly) {
+            result.append(part);
+        } else {
+            result.append(capitalizeFirst(part));
+        }
     }
 
     /**
