@@ -13,6 +13,7 @@ public class GeneratorBuilder {
     private GeneratorContext context;
     private GeneratorType type = GeneratorType.EMBEDDED;
     private boolean primitiveNumericFields;
+    private boolean disableValidation;
 
     public enum GeneratorType {
         EMBEDDED,
@@ -28,6 +29,14 @@ public class GeneratorBuilder {
      */
     public GeneratorBuilder withPackageName(String packageName) {
         this.packageName = packageName;
+        return this;
+    }
+
+    /**
+     * Disable input size validation on setters.
+     */
+    public GeneratorBuilder withDisableValidation(boolean disableValidation) {
+        this.disableValidation = disableValidation;
         return this;
     }
 
@@ -71,7 +80,8 @@ public class GeneratorBuilder {
     public EmbeddedSerializationPojoGenerator buildEmbeddedGenerator() {
         EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator(context);
         return generator.withPackage(packageName)
-                .withPrimitiveNumericFields(primitiveNumericFields);
+                .withPrimitiveNumericFields(primitiveNumericFields)
+                .withDisableValidation(disableValidation);
     }
 
     /**
@@ -79,7 +89,8 @@ public class GeneratorBuilder {
      */
     public AnnotationPojoGenerator buildAnnotationGenerator() {
         AnnotationPojoGenerator generator = new AnnotationPojoGenerator(context);
-        return generator.withPackage(packageName);
+        return generator.withPackage(packageName)
+                .withDisableValidation(disableValidation);
     }
 
     /**
@@ -127,4 +138,3 @@ public class GeneratorBuilder {
                 .buildAnnotationGenerator();
     }
 }
-

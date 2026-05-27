@@ -6,6 +6,15 @@ import java.math.RoundingMode;
 
 public class FieldLengthUtil {
 
+    private static final long[] MAX_VALUES = new long[19];
+    static {
+        long value = 0;
+        for (int i = 1; i <= 18; i++) {
+            value = value * 10 + 9;
+            MAX_VALUES[i] = value;
+        }
+    }
+
     private FieldLengthUtil() {
         // Prevent instantiation
     }
@@ -67,7 +76,6 @@ public class FieldLengthUtil {
      */
     public static BigDecimal checkBigDecimalRange(BigDecimal value, int integerDigits, String fieldName) {
         if (value != null) {
-            BigDecimal integerPart = value.abs().setScale(0, RoundingMode.DOWN);
             BigDecimal maxAllowed = new BigDecimal(String.valueOf(calculateMaxValue(integerDigits)));
             BigDecimal minAllowed = maxAllowed.negate();
             if (value.compareTo(maxAllowed) > 0 || value.compareTo(minAllowed) < 0) {
@@ -202,7 +210,12 @@ public class FieldLengthUtil {
      * For example: 3 digits -> 999, 5 digits -> 99999
      */
     private static long calculateMaxValue(int digits) {
-        if (digits == 0) return 0;
+        if (digits <= 0) {
+            return 0;
+        }
+        if (digits < MAX_VALUES.length) {
+            return MAX_VALUES[digits];
+        }
         long max = 1;
         for (int i = 0; i < digits; i++) {
             max *= 10;

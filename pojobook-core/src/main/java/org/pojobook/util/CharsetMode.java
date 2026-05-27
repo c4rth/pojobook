@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentMap;
  *   <li>{@link #ASCII}  – ASCII-compatible charsets (US-ASCII, UTF-8, ISO-8859-*)</li>
  *   <li>{@link #EBCDIC} – EBCDIC charsets (CP1047, CP037, …)</li>
  *   <li>{@link #UNKNOWN} – unsupported / multi-byte charsets</li>
+ *   <li>{@link #UNKNOWN} – unsupported / multi-byte charsets</li>
  * </ul>
  * <p>
  * Detection results are cached so that repeated calls with the same {@link Charset}
@@ -34,6 +35,12 @@ public final class CharsetMode {
     // EBCDIC byte values
     public static final byte EBCDIC_SPACE = 0x40;
     public static final byte EBCDIC_ZERO = (byte) 0xF0;
+
+    /** Statically cached instance of IBM CP1047 to prevent high-concurrency lookup bottlenecks. */
+    public static final Charset CHARSET_CP1047 = Charset.forName("CP1047");
+    
+    /** Statically cached instance of IBM CP037 to prevent high-concurrency lookup bottlenecks. */
+    public static final Charset CHARSET_CP037 = Charset.forName("CP037");
 
     /** Cache of detection results keyed by Charset instance. */
     private static final ConcurrentMap<Charset, Integer> CACHE = new ConcurrentHashMap<>();
@@ -93,4 +100,3 @@ public final class CharsetMode {
         return mode == EBCDIC ? EBCDIC_ZERO : ASCII_ZERO;
     }
 }
-

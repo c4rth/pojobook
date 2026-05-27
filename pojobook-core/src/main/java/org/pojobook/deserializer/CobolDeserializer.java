@@ -17,7 +17,6 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Deserializes COBOL binary data into POJO instances.
@@ -25,17 +24,36 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class CobolDeserializer {
 
-    // Cache for field metadata to avoid repeated reflection
-    private static final Map<Class<?>, List<FieldMetadata>> FIELD_CACHE = new ConcurrentHashMap<>();
+    // Cache for field metadata to avoid repeated reflection and prevent classloader leaks
+    private static final ClassValue<List<FieldMetadata>> FIELD_CACHE = new ClassValue<>() {
+        @Override
+        protected List<FieldMetadata> computeValue(Class<?> clazz) {
+            return computeFieldMetadataStatic(clazz);
+        }
+    };
 
-    // Cache for single-occur field annotations
-    private static final Map<CobolField, CobolField> SINGLE_OCCUR_CACHE = new ConcurrentHashMap<>();
+    // Cache for single-occur field annotations and prevent classloader leaks
+    private static final Map<CobolField, CobolField> SINGLE_OCCUR_CACHE = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
-    // Cache for nested class type detection to avoid repeated reflection scans
-    private static final Map<Class<?>, Boolean> NESTED_CLASS_CACHE = new ConcurrentHashMap<>();
+    // Cache for nested class type detection to avoid repeated reflection scans and prevent classloader leaks
+    private static final ClassValue<Boolean> NESTED_CLASS_CACHE = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            return Arrays.stream(type.getDeclaredFields())
+                    .anyMatch(f -> f.isAnnotationPresent(CobolField.class));
+        }
+    };
 
-    // Cache for nested class length to avoid repeated reflection + calculation
-    private static final Map<Class<?>, Integer> NESTED_CLASS_LENGTH_CACHE = new ConcurrentHashMap<>();
+    // Cache for nested class length to avoid repeated reflection + calculation and prevent classloader leaks
+    private static final ClassValue<Integer> NESTED_CLASS_LENGTH_CACHE = new ClassValue<>() {
+        @Override
+        protected Integer computeValue(Class<?> clazz) {
+            return Arrays.stream(clazz.getDeclaredFields())
+                    .filter(field -> field.isAnnotationPresent(CobolField.class))
+                    .mapToInt(field -> calculateFieldLengthStatic(field, field.getAnnotation(CobolField.class)))
+                    .sum();
+        }
+    };
 
     // Type category constants for fast int-based dispatch (avoids getSimpleName() allocation)
     private static final int TYPE_INT = 1;
@@ -123,18 +141,26 @@ public class CobolDeserializer {
      * Get cached field metadata or compute and cache it.
      */
     private List<FieldMetadata> getFieldMetadata(Class<?> clazz) {
-        return FIELD_CACHE.computeIfAbsent(clazz, this::computeFieldMetadata);
+        return FIELD_CACHE.get(clazz);
+    }
+
+    private static int calculateFieldLengthStatic(Field field, CobolField cobolField) {
+        if (field.getType().isArray() && isNestedClassType(field.getType().getComponentType())) {
+            int elementLength = calculateNestedClassLength(field.getType().getComponentType());
+            return elementLength * cobolField.occurs();
+        }
+        return CobolFieldUtil.calculateFieldLength(cobolField) * cobolField.occurs();
     }
 
     /**
      * Compute field metadata for a class.
      */
-    private List<FieldMetadata> computeFieldMetadata(Class<?> clazz) {
+    private static List<FieldMetadata> computeFieldMetadataStatic(Class<?> clazz) {
         return Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(CobolField.class))
                 .map(f -> {
                     CobolField annotation = f.getAnnotation(CobolField.class);
-                    int size = calculateFieldLength(f, annotation);
+                    int size = calculateFieldLengthStatic(f, annotation);
 
                     // Calculate base length (single occurrence)
                     int baseLength;
@@ -193,11 +219,7 @@ public class CobolDeserializer {
     }
 
     private int calculateFieldLength(Field field, CobolField cobolField) {
-        if (field.getType().isArray() && isNestedClassType(field.getType().getComponentType())) {
-            int elementLength = calculateNestedClassLength(field.getType().getComponentType());
-            return elementLength * cobolField.occurs();
-        }
-        return CobolFieldUtil.calculateFieldLength(cobolField) * cobolField.occurs();
+        return calculateFieldLengthStatic(field, cobolField);
     }
 
     private void validateDataLength(byte[] data, int offset, int fieldLength, int limit, String fieldName) throws DeserializationException {
@@ -249,7 +271,17 @@ public class CobolDeserializer {
      * Get or create cached single-occur field annotation.
      */
     private CobolField getSingleOccurField(CobolField original) {
-        return SINGLE_OCCUR_CACHE.computeIfAbsent(original, this::createSingleOccurField);
+        CobolField cached = SINGLE_OCCUR_CACHE.get(original);
+        if (cached == null) {
+            synchronized (SINGLE_OCCUR_CACHE) {
+                cached = SINGLE_OCCUR_CACHE.get(original);
+                if (cached == null) {
+                    cached = createSingleOccurField(original);
+                    SINGLE_OCCUR_CACHE.put(original, cached);
+                }
+            }
+        }
+        return cached;
     }
 
     /**
@@ -354,8 +386,7 @@ public class CobolDeserializer {
     private Object deserializeDisplayWithEmbeddedSignDirect(byte[] data, int offset, int length,
                                                             CobolField field, int typeCategory, Charset charset) {
         return switch (typeCategory) {
-            case TYPE_INT ->
-                    CobolFieldDeserializer.deserializeDisplaySignedInteger(data, offset, length, charset);
+            case TYPE_INT -> CobolFieldDeserializer.deserializeDisplaySignedInteger(data, offset, length, charset);
             case TYPE_LONG -> CobolFieldDeserializer.deserializeDisplaySignedLong(data, offset, length, charset);
             case TYPE_BIG_DECIMAL ->
                     CobolFieldDeserializer.deserializeDisplaySignedBigDecimal(data, offset, length, charset, field.decimalDigits());
@@ -464,27 +495,16 @@ public class CobolDeserializer {
     /**
      * Check if a type is a nested class with COBOL fields.
      */
-    private boolean isNestedClassType(Class<?> type) {
-        return NESTED_CLASS_CACHE.computeIfAbsent(type, t ->
-                Arrays.stream(t.getDeclaredFields())
-                        .anyMatch(f -> f.isAnnotationPresent(CobolField.class)));
+    private static boolean isNestedClassType(Class<?> type) {
+        return NESTED_CLASS_CACHE.get(type);
     }
 
     /**
      * Calculate the total length of a nested class by summing all its fields.
      * Result is cached per class to avoid repeated reflection scans.
      */
-    private int calculateNestedClassLength(Class<?> clazz) {
-        Integer cached = NESTED_CLASS_LENGTH_CACHE.get(clazz);
-        if (cached != null) {
-            return cached;
-        }
-        int length = Arrays.stream(clazz.getDeclaredFields())
-                .filter(field -> field.isAnnotationPresent(CobolField.class))
-                .mapToInt(field -> calculateFieldLength(field, field.getAnnotation(CobolField.class)))
-                .sum();
-        NESTED_CLASS_LENGTH_CACHE.put(clazz, length);
-        return length;
+    private static int calculateNestedClassLength(Class<?> clazz) {
+        return NESTED_CLASS_LENGTH_CACHE.get(clazz);
     }
 
     /**
@@ -515,7 +535,7 @@ public class CobolDeserializer {
         return deserializeDisplayString(data, typeCategory, charset);
     }
 
-    private boolean isNumericType(Class<?> type) {
+    private static boolean isNumericType(Class<?> type) {
         return type == Integer.class || type == int.class ||
                 type == Long.class || type == long.class ||
                 type == BigDecimal.class || type == BigInteger.class;
@@ -578,7 +598,7 @@ public class CobolDeserializer {
      * Deserialize DISPLAY field with SIGN LEADING/TRAILING SEPARATE.
      */
     private Object deserializeDisplayWithSeparateSign(byte[] data, int offset, int length,
-                                                     CobolField field, int typeCategory, Charset charset) {
+                                                      CobolField field, int typeCategory, Charset charset) {
         if (length == 0) {
             return getDefaultValue(typeCategory);
         }
@@ -597,7 +617,7 @@ public class CobolDeserializer {
     }
 
     // Sign byte constants for known charsets
-    private static final byte ASCII_MINUS  = 0x2D;  // '-'
+    private static final byte ASCII_MINUS = 0x2D;  // '-'
     private static final byte EBCDIC_MINUS = 0x60;  // '-' in EBCDIC
 
     private SignAndDigits extractSignAndDigits(byte[] data, int offset, int length, CobolField field, Charset charset) {

@@ -18,6 +18,28 @@ import java.util.Arrays;
  */
 public class CobolFieldSerializer {
 
+    private static final BigInteger[] BI_MAX_VALUES = new BigInteger[100];
+    static {
+        BigInteger val = BigInteger.ZERO;
+        for (int i = 1; i < BI_MAX_VALUES.length; i++) {
+            val = val.multiply(BigInteger.TEN).add(BigInteger.valueOf(9));
+            BI_MAX_VALUES[i] = val;
+        }
+    }
+
+    private static void checkDigitLimit(BigInteger absValue, int totalDigits) {
+        if (totalDigits < BI_MAX_VALUES.length) {
+            if (absValue.compareTo(BI_MAX_VALUES[totalDigits]) > 0) {
+                throw new IllegalArgumentException("Numeric value " + absValue + " overflows representation of " + totalDigits + " digits");
+            }
+        } else {
+            BigInteger maxLimit = BigInteger.TEN.pow(totalDigits).subtract(BigInteger.ONE);
+            if (absValue.compareTo(maxLimit) > 0) {
+                throw new IllegalArgumentException("Numeric value " + absValue + " overflows representation of " + totalDigits + " digits");
+            }
+        }
+    }
+
     /**
      * Serialize DISPLAY string.
      * <p>
@@ -167,7 +189,15 @@ public class CobolFieldSerializer {
         }
 
         BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
-        char[] digits = toZeroPaddedDigits(biValue.abs().longValue(), totalDigits);
+        BigInteger absValue = biValue.abs();
+        checkDigitLimit(absValue, totalDigits);
+
+        char[] digits;
+        if (totalDigits <= 18) {
+            digits = toZeroPaddedDigits(absValue.longValue(), totalDigits);
+        } else {
+            digits = toZeroPaddedDigits(absValue, totalDigits);
+        }
 
         int byteLength = (totalDigits / 2) + 1;
         byte[] packed = new byte[byteLength];
@@ -196,14 +226,22 @@ public class CobolFieldSerializer {
             bdValue = bdValue.multiply(BigDecimal.TEN.pow(decimalDigits));
         }
 
-        long longValue = bdValue.setScale(0, RoundingMode.HALF_UP).longValue();
-        char[] digits = toZeroPaddedDigits(Math.abs(longValue), totalDigits);
+        BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
+        BigInteger absValue = biValue.abs();
+        checkDigitLimit(absValue, totalDigits);
+
+        char[] digits;
+        if (totalDigits <= 18) {
+            digits = toZeroPaddedDigits(absValue.longValue(), totalDigits);
+        } else {
+            digits = toZeroPaddedDigits(absValue, totalDigits);
+        }
         byte[] zoned = new byte[totalDigits];
 
         for (int i = 0; i < totalDigits; i++) {
             byte digit = (byte) (digits[i] - '0');
             if (i == totalDigits - 1 && signed) {
-                zoned[i] = (byte) ((longValue < 0 ? 0xD0 : 0xC0) | digit);
+                zoned[i] = (byte) ((biValue.signum() < 0 ? 0xD0 : 0xC0) | digit);
             } else {
                 zoned[i] = (byte) (0xF0 | digit);
             }
@@ -215,7 +253,31 @@ public class CobolFieldSerializer {
     // Helper methods
 
     private static BigDecimal toBigDecimal(Number value) {
-        return value instanceof BigDecimal bd ? bd : new BigDecimal(value.toString());
+        if (value instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (value instanceof Long l) {
+            return BigDecimal.valueOf(l);
+        }
+        if (value instanceof Integer i) {
+            return BigDecimal.valueOf(i);
+        }
+        if (value instanceof Short s) {
+            return BigDecimal.valueOf(s);
+        }
+        if (value instanceof Byte b) {
+            return BigDecimal.valueOf(b);
+        }
+        if (value instanceof BigInteger bi) {
+            return new BigDecimal(bi);
+        }
+        if (value instanceof Double d) {
+            return BigDecimal.valueOf(d);
+        }
+        if (value instanceof Float f) {
+            return BigDecimal.valueOf(f);
+        }
+        return new BigDecimal(value.toString());
     }
 
     /**
@@ -234,6 +296,18 @@ public class CobolFieldSerializer {
         }
         if (value instanceof Short s) {
             return BigDecimal.valueOf(s);
+        }
+        if (value instanceof Byte b) {
+            return BigDecimal.valueOf(b);
+        }
+        if (value instanceof BigInteger bi) {
+            return new BigDecimal(bi);
+        }
+        if (value instanceof Double d) {
+            return BigDecimal.valueOf(d);
+        }
+        if (value instanceof Float f) {
+            return BigDecimal.valueOf(f);
         }
         return new BigDecimal(value.toString());
     }
@@ -263,6 +337,23 @@ public class CobolFieldSerializer {
         for (int i = length - 1; i >= 0; i--) {
             digits[i] = (char) ('0' + (int) (absValue % 10));
             absValue /= 10;
+        }
+        return digits;
+    }
+
+    /**
+     * Convert a non-negative BigInteger value into a zero-padded char array of the given length.
+     */
+    private static char[] toZeroPaddedDigits(BigInteger absValue, int length) {
+        char[] digits = new char[length];
+        String str = absValue.toString();
+        int strLen = str.length();
+        int padding = length - strLen;
+        if (padding > 0) {
+            Arrays.fill(digits, 0, padding, '0');
+            str.getChars(0, strLen, digits, padding);
+        } else {
+            str.getChars(strLen - length, strLen, digits, 0);
         }
         return digits;
     }
@@ -524,7 +615,15 @@ public class CobolFieldSerializer {
 
     private static void packComp3IntoBuffer(byte[] buffer, int offset, BigDecimal bdValue, int totalDigits) {
         BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
-        char[] digits = toZeroPaddedDigits(biValue.abs().longValue(), totalDigits);
+        BigInteger absValue = biValue.abs();
+        checkDigitLimit(absValue, totalDigits);
+
+        char[] digits;
+        if (totalDigits <= 18) {
+            digits = toZeroPaddedDigits(absValue.longValue(), totalDigits);
+        } else {
+            digits = toZeroPaddedDigits(absValue, totalDigits);
+        }
 
         int byteLength = (totalDigits / 2) + 1;
         int digitIndex = 0;
@@ -573,17 +672,24 @@ public class CobolFieldSerializer {
 
     private static void writeZonedDecimalToBuffer(byte[] buffer, int offset, BigDecimal bdValue,
                                                    int totalDigits, boolean signed) {
-        long longValue = bdValue.setScale(0, RoundingMode.HALF_UP).longValue();
-        char[] digits = toZeroPaddedDigits(Math.abs(longValue), totalDigits);
+        BigInteger biValue = bdValue.setScale(0, RoundingMode.HALF_UP).toBigInteger();
+        BigInteger absValue = biValue.abs();
+        checkDigitLimit(absValue, totalDigits);
+
+        char[] digits;
+        if (totalDigits <= 18) {
+            digits = toZeroPaddedDigits(absValue.longValue(), totalDigits);
+        } else {
+            digits = toZeroPaddedDigits(absValue, totalDigits);
+        }
 
         for (int i = 0; i < totalDigits; i++) {
             byte digit = (byte) (digits[i] - '0');
             if (i == totalDigits - 1 && signed) {
-                buffer[offset + i] = (byte) ((longValue < 0 ? 0xD0 : 0xC0) | digit);
+                buffer[offset + i] = (byte) ((biValue.signum() < 0 ? 0xD0 : 0xC0) | digit);
             } else {
                 buffer[offset + i] = (byte) (0xF0 | digit);
             }
         }
     }
 }
-

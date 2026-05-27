@@ -12,11 +12,47 @@ import java.math.BigDecimal;
  */
 public class FieldValidator {
 
+    private boolean disableValidation = false;
+
+    public void setDisableValidation(boolean disableValidation) {
+        this.disableValidation = disableValidation;
+    }
+
+    public boolean isDisableValidation() {
+        return disableValidation;
+    }
+
     /**
      * Add validation and assignment to a setter method.
      */
     public void addValidationAndAssignment(MethodSpec.Builder setter, FieldDefinition field,
                                            String fieldName, TypeName fieldType) {
+        if (disableValidation) {
+            if (isBigDecimalType(fieldType)) {
+                setter.beginControlFlow("if ($L != null)", fieldName);
+                setter.addStatement("this.$L = $L.stripTrailingZeros()", fieldName, fieldName);
+                setter.nextControlFlow("else");
+                setter.addStatement("this.$L = $L", fieldName, fieldName);
+                setter.endControlFlow();
+            } else if (isBigDecimalArrayType(fieldType)) {
+                setter.beginControlFlow("if ($L != null)", fieldName);
+                setter.addStatement("this.$L = new $T[$L.length]", fieldName, BigDecimal.class, fieldName);
+                setter.beginControlFlow("for (int i = 0; i < $L.length; i++)", fieldName);
+                setter.beginControlFlow("if ($L[i] != null)", fieldName);
+                setter.addStatement("this.$L[i] = $L[i].stripTrailingZeros()", fieldName, fieldName);
+                setter.nextControlFlow("else");
+                setter.addStatement("this.$L[i] = null", fieldName);
+                setter.endControlFlow();
+                setter.endControlFlow();
+                setter.nextControlFlow("else");
+                setter.addStatement("this.$L = null", fieldName);
+                setter.endControlFlow();
+            } else {
+                setter.addStatement("this.$L = $L", fieldName, fieldName);
+            }
+            return;
+        }
+
         ClassName utilClass = ClassName.get("org.pojobook.util", "FieldLengthUtil");
         String javaType = fieldType.toString();
 
@@ -197,4 +233,3 @@ public class FieldValidator {
                 .endControlFlow();
     }
 }
-

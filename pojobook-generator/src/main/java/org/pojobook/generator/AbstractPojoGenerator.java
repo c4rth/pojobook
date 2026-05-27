@@ -60,6 +60,15 @@ public abstract class AbstractPojoGenerator {
         this.objectMethodsGenerator = context.getObjectMethodsGenerator();
     }
 
+    /**
+     * Disable input size validation on setters.
+     */
+    @SuppressWarnings("unchecked")
+    public <T extends AbstractPojoGenerator> T withDisableValidation(boolean disableValidation) {
+        this.fieldValidator.setDisableValidation(disableValidation);
+        return (T) this;
+    }
+
     public abstract String generate(CopybookDefinition definition);
 
     protected abstract TypeSpec buildNestedClass(String className, FieldNode node);

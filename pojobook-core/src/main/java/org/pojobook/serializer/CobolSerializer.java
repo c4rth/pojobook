@@ -14,7 +14,6 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Serializes POJO instances to COBOL binary format.
@@ -24,14 +23,25 @@ public class CobolSerializer {
 
     private static final Logger logger = LoggerFactory.getLogger(CobolSerializer.class);
 
-    // Cache for field metadata to avoid repeated reflection
-    private static final Map<Class<?>, List<FieldMetadata>> FIELD_CACHE = new ConcurrentHashMap<>();
+    // Cache for field metadata to avoid repeated reflection and prevent classloader leaks
+    private static final ClassValue<List<FieldMetadata>> FIELD_CACHE = new ClassValue<>() {
+        @Override
+        protected List<FieldMetadata> computeValue(Class<?> clazz) {
+            return computeFieldMetadataStatic(clazz);
+        }
+    };
 
-    // Cache for single-occur field annotations to avoid expensive proxy creation
-    private static final Map<CobolField, CobolField> SINGLE_OCCUR_CACHE = new ConcurrentHashMap<>();
+    // Cache for single-occur field annotations to avoid expensive proxy creation and prevent classloader leaks
+    private static final Map<CobolField, CobolField> SINGLE_OCCUR_CACHE = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
-    // Cache for nested class type detection to avoid repeated reflection scans
-    private static final Map<Class<?>, Boolean> NESTED_CLASS_CACHE = new ConcurrentHashMap<>();
+    // Cache for nested class type detection to avoid repeated reflection scans and prevent classloader leaks
+    private static final ClassValue<Boolean> NESTED_CLASS_CACHE = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            return Arrays.stream(type.getDeclaredFields())
+                    .anyMatch(f -> f.isAnnotationPresent(CobolField.class));
+        }
+    };
 
     /**
      * Cached field metadata for performance.
@@ -80,14 +90,14 @@ public class CobolSerializer {
      * Get cached field metadata or compute and cache it.
      */
     private List<FieldMetadata> getFieldMetadata(Class<?> clazz) {
-        return FIELD_CACHE.computeIfAbsent(clazz, this::computeFieldMetadata);
+        return FIELD_CACHE.get(clazz);
     }
 
     /**
      * Compute field metadata for a class.
      * Uses {@link CobolFieldUtil#calculateFieldLength} for correct byte sizes across all COBOL types.
      */
-    private List<FieldMetadata> computeFieldMetadata(Class<?> clazz) {
+    private static List<FieldMetadata> computeFieldMetadataStatic(Class<?> clazz) {
         return Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(CobolField.class))
                 .map(f -> {
@@ -125,7 +135,7 @@ public class CobolSerializer {
      * Uses direct reflection instead of {@link #getFieldMetadata} to avoid recursive
      * {@code ConcurrentHashMap.computeIfAbsent} calls.
      */
-    private int computeNestedClassSize(Class<?> clazz) {
+    private static int computeNestedClassSize(Class<?> clazz) {
         return Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(CobolField.class))
                 .mapToInt(f -> {
@@ -186,14 +196,15 @@ public class CobolSerializer {
     /**
      * Serialize a simple (non-array) field directly into the buffer.
      *
-     * @param scaleFactor pre-computed scale factor for COMP-3/ZONED-DECIMAL, or {@code null}
+     * @param scaleFactor      pre-computed scale factor for COMP-3/ZONED-DECIMAL, or {@code null}
      * @param isNumericPicture cached result of whether the picture is numeric
      */
     private void serializeSimpleFieldDirect(Object value, CobolField cobolField, int baseLength,
                                             BigDecimal scaleFactor, boolean isNumericPicture,
                                             byte[] buffer, int offset, Charset charset) {
         switch (cobolField.type()) {
-            case DISPLAY -> serializeDisplayDirect(value, cobolField, baseLength, isNumericPicture, buffer, offset, charset);
+            case DISPLAY ->
+                    serializeDisplayDirect(value, cobolField, baseLength, isNumericPicture, buffer, offset, charset);
             case COMP, COMP_5 -> CobolFieldSerializer.serializeCompDirect(buffer, offset, value,
                     cobolField.integerDigits() + cobolField.decimalDigits());
             case COMP_1 -> CobolFieldSerializer.serializeComp1Direct(buffer, offset, value);
@@ -275,19 +286,27 @@ public class CobolSerializer {
      * Get or create cached single-occur field annotation.
      */
     private CobolField getSingleOccurField(CobolField original) {
-        return SINGLE_OCCUR_CACHE.computeIfAbsent(original, this::createSingleOccurField);
+        CobolField cached = SINGLE_OCCUR_CACHE.get(original);
+        if (cached == null) {
+            synchronized (SINGLE_OCCUR_CACHE) {
+                cached = SINGLE_OCCUR_CACHE.get(original);
+                if (cached == null) {
+                    cached = createSingleOccurField(original);
+                    SINGLE_OCCUR_CACHE.put(original, cached);
+                }
+            }
+        }
+        return cached;
     }
 
     /**
      * Check if a type is a nested class with COBOL fields.
      */
-    private boolean isNestedClassType(Class<?> type) {
-        return NESTED_CLASS_CACHE.computeIfAbsent(type, t ->
-                Arrays.stream(t.getDeclaredFields())
-                        .anyMatch(f -> f.isAnnotationPresent(CobolField.class)));
+    private static boolean isNestedClassType(Class<?> type) {
+        return NESTED_CLASS_CACHE.get(type);
     }
 
-    private boolean isNumericPicture(String picture) {
+    private static boolean isNumericPicture(String picture) {
         return picture.startsWith("9") || picture.startsWith("S9");
     }
 

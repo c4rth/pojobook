@@ -75,6 +75,12 @@ public class GenerateMojo extends AbstractMojo {
     private String generatorType;
 
     /**
+     * Disable bounds and length validation in generated setters for low-latency systems.
+     */
+    @Parameter(property = "disableValidation", defaultValue = "false")
+    private boolean disableValidation;
+
+    /**
      * Skip the plugin execution.
      */
     @Parameter(property = "pojobook.skip", defaultValue = "false")
@@ -147,9 +153,11 @@ public class GenerateMojo extends AbstractMojo {
         // Generate the POJO using GeneratorBuilder
         if ("embedded".equalsIgnoreCase(generatorType)) {
             GeneratorBuilder.embeddedGenerator(packageName)
+                    .withDisableValidation(disableValidation)
                     .generateToFile(definition, outputFile);
         } else {
             GeneratorBuilder.annotationGenerator(packageName)
+                    .withDisableValidation(disableValidation)
                     .generateToFile(definition, outputFile);
         }
 
@@ -322,4 +330,3 @@ public class GenerateMojo extends AbstractMojo {
         return lastDot > 0 ? name.substring(0, lastDot) : name;
     }
 }
-

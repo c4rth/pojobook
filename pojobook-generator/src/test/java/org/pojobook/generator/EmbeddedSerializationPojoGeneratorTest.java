@@ -260,5 +260,41 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(defaultCode.contains("private Long total = 0L;"));
         assertTrue(defaultCode.contains("private Short binaryShort = (short) 0;"));
     }
-}
 
+    @Test
+    void testGeneratePojoWithDisableValidation() throws ParseException {
+        String copybook = """
+                   01  CUSTOMER-RECORD.
+                       05  CUSTOMER-ID         PIC 9(10).
+                       05  CUSTOMER-NAME       PIC X(50).
+                       05  CUSTOMER-BALANCE    PIC S9(7)V99 COMP-3.
+                """;
+
+        CopybookParser parser = new CopybookParser();
+        CopybookDefinition definition = parser.parse(copybook);
+        definition.setRecordName("CUSTOMER-RECORD");
+
+        // Generator with validation disabled
+        EmbeddedSerializationPojoGenerator generator = new GeneratorBuilder()
+                .withPackageName("com.example.generated")
+                .withDisableValidation(true)
+                .buildEmbeddedGenerator();
+
+        String generatedCode = generator.generate(definition);
+
+        log.info("=== Generated POJO with Disable Validation ===");
+        log.info(generatedCode);
+        log.info("===============================================");
+
+        assertNotNull(generatedCode);
+        // Setters should NOT have FieldLengthUtil validation calls
+        assertFalse(generatedCode.contains("FieldLengthUtil.checkLongRange"));
+        assertFalse(generatedCode.contains("FieldLengthUtil.checkStringLength"));
+        assertFalse(generatedCode.contains("FieldLengthUtil.checkBigDecimalRange"));
+
+        // Instead, they should have direct assignments
+        assertTrue(generatedCode.contains("this.customerId = customerId;"));
+        assertTrue(generatedCode.contains("this.customerName = customerName;"));
+        assertTrue(generatedCode.contains("this.customerBalance = customerBalance;"));
+    }
+}

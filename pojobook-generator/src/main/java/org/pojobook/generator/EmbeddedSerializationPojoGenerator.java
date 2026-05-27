@@ -179,7 +179,7 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
         // Add charset constant
         context.builder
                 .addField(FieldSpec.builder(Charset.class, "CHARSET_CP1047", Modifier.PRIVATE, Modifier.STATIC, Modifier.FINAL)
-                        .initializer("Charset.forName(\"CP1047\")")
+                        .initializer("$T.CHARSET_CP1047", org.pojobook.util.CharsetMode.class)
                         .build());
 
         // Delegate to offsetCalculator for offset/size constants
