@@ -14,12 +14,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class EmbeddedSerializationPojoGeneratorTest {
+class StandaloneSerializationPojoGeneratorTest {
 
-    private final Logger log = LoggerFactory.getLogger(EmbeddedSerializationPojoGeneratorTest.class);
+    private final Logger log = LoggerFactory.getLogger(StandaloneSerializationPojoGeneratorTest.class);
 
     @Test
-    void testGeneratePojoWithEmbeddedSerialization() throws ParseException {
+    void testGeneratePojoWithStandaloneSerialization() throws ParseException {
         String copybook = """
                    01  EMPLOYEE-RECORD.
                        05  EMPLOYEE-ID         PIC 9(8).
@@ -33,12 +33,12 @@ class EmbeddedSerializationPojoGeneratorTest {
         CopybookDefinition definition = parser.parse(copybook);
         definition.setRecordName("EMPLOYEE-RECORD");
 
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator generator = new StandaloneSerializationPojoGenerator()
                 .withPackage("com.example.generated");
 
         String generatedCode = generator.generate(definition);
 
-        log.info("=== Generated POJO with Embedded Serialization ===");
+        log.info("=== Generated POJO with Standalone Serialization ===");
         log.info(generatedCode);
         log.info("==================================================");
 
@@ -85,7 +85,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         CopybookDefinition definition = parser.parse(copybook);
         definition.setRecordName("SALES-RECORD");
 
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator generator = new StandaloneSerializationPojoGenerator()
                 .withPackage("com.example.generated");
 
         String generatedCode = generator.generate(definition);
@@ -133,7 +133,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         CopybookDefinition definition = parser.parse(copybook);
         definition.setRecordName("COMPANY-RECORD");
 
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator generator = new StandaloneSerializationPojoGenerator()
                 .withPackage("com.example.generated");
 
         String generatedCode = generator.generate(definition);
@@ -177,7 +177,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         CopybookParser parser = new CopybookParser();
         CopybookDefinition definition = parser.parse(copybookPath);
 
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator generator = new StandaloneSerializationPojoGenerator()
                 .withPackage("org.pojobook.generated");
 
         String generatedCode = generator.generate(definition);
@@ -215,7 +215,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         CopybookDefinition definition = parser.parse(copybook);
         definition.setRecordName("CUSTOMER-RECORD");
 
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator generator = new StandaloneSerializationPojoGenerator()
                 .withPackage("com.example.generated");
 
         String generatedCode = generator.generate(definition);
@@ -238,7 +238,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         CopybookDefinition definition = parser.parse(copybook);
         definition.setRecordName("METRICS-RECORD");
 
-        EmbeddedSerializationPojoGenerator primitiveGenerator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator primitiveGenerator = new StandaloneSerializationPojoGenerator()
                 .withPackage("com.example.generated")
                 .withPrimitiveNumericFields(true);
 
@@ -251,7 +251,7 @@ class EmbeddedSerializationPojoGeneratorTest {
         assertTrue(primitiveCode.contains("public void setCounter(int counter)"));
         assertTrue(primitiveCode.contains("counter = CobolFieldDeserializer.deserializeDisplayInteger("));
 
-        EmbeddedSerializationPojoGenerator defaultGenerator = new EmbeddedSerializationPojoGenerator()
+        StandaloneSerializationPojoGenerator defaultGenerator = new StandaloneSerializationPojoGenerator()
                 .withPackage("com.example.generated");
 
         String defaultCode = defaultGenerator.generate(definition);
@@ -275,10 +275,10 @@ class EmbeddedSerializationPojoGeneratorTest {
         definition.setRecordName("CUSTOMER-RECORD");
 
         // Generator with validation disabled
-        EmbeddedSerializationPojoGenerator generator = new GeneratorBuilder()
+        StandaloneSerializationPojoGenerator generator = new GeneratorBuilder()
                 .withPackageName("com.example.generated")
                 .withDisableValidation(true)
-                .buildEmbeddedGenerator();
+                .buildStandaloneGenerator();
 
         String generatedCode = generator.generate(definition);
 

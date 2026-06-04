@@ -23,7 +23,7 @@ import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JMH Benchmark comparing JRecord, Annotation-based POJOBook, and Embedded POJOBook serialization.
+ * JMH Benchmark comparing JRecord, Annotation-based POJOBook, and Standalone POJOBook serialization.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -35,7 +35,7 @@ public class CopybookSerializationBenchmark {
 
     private static final Charset CHARSET = Charset.forName("CP1047");
 
-    private org.pojobook.samples.embedded.SampleCbk embeddedPojo;
+    private org.pojobook.samples.standalone.SampleCbk standalonePojo;
     private org.pojobook.samples.annotation.SampleCbk annotationPojo;
     private LineSampleCbkPojo jrecordPojo;
     private PojoBook pojoBook;
@@ -54,7 +54,7 @@ public class CopybookSerializationBenchmark {
 
         // Deserialize into all formats for serialization benchmarks
         jrecordPojo = copybookConverter.convertToCopybookModel(original);
-        embeddedPojo = org.pojobook.samples.embedded.SampleCbk.deserialize(original, CHARSET);
+        standalonePojo = org.pojobook.samples.standalone.SampleCbk.deserialize(original, CHARSET);
         annotationPojo = pojoBook.deserialize(original, org.pojobook.samples.annotation.SampleCbk.class, CHARSET);
     }
 
@@ -120,8 +120,8 @@ public class CopybookSerializationBenchmark {
     }
 
     @Benchmark
-    public boolean benchmarkEmbeddedSerialization() throws Exception {
-        byte[] ser = embeddedPojo.serialize(CHARSET);
+    public boolean benchmarkStandaloneSerialization() throws Exception {
+        byte[] ser = standalonePojo.serialize(CHARSET);
         assert Arrays.equals(ser, original);
         return true;
     }

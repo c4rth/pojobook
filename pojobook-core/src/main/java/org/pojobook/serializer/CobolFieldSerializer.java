@@ -14,7 +14,7 @@ import java.util.Arrays;
 /**
  * Helper class containing COBOL field serialization methods.
  * This class is used by both CobolSerializer (for runtime serialization)
- * and EmbeddedSerializationPojoGenerator (for code generation).
+ * and StandaloneSerializationPojoGenerator (for code generation).
  */
 public class CobolFieldSerializer {
 

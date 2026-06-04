@@ -29,9 +29,9 @@
         <revision>0.1.0-SNAPSHOT</revision>
 
         <!-- Dependency versions -->
-        <slf4j.version>2.0.17</slf4j.version>
-        <junit.version>6.0.1</junit.version>
-        <javapoet.version>0.12.0</javapoet.version>
+        <slf4j.version>2.0.18</slf4j.version>
+        <junit.version>6.1.0</junit.version>
+        <javapoet.version>0.16.0</javapoet.version>
     </properties>
 
     <modules>
@@ -39,7 +39,7 @@
         <module>pojobook-generator</module>
         <module>pojobook-maven-plugin</module>
         <module>pojobook-samples-annotation</module>
-        <module>pojobook-samples-embedded</module>
+        <module>pojobook-samples-standalone</module>
         <module>pojobook-benchmark</module>
         <module>private-samples-jrecord</module>
         <module>private-samples</module>

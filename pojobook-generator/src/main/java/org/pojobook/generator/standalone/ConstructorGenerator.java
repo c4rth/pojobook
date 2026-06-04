@@ -1,4 +1,4 @@
-package org.pojobook.generator.embedded;
+package org.pojobook.generator.standalone;
 
 import com.palantir.javapoet.MethodSpec;
 import org.pojobook.generator.FieldNameTracker;

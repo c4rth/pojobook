@@ -11,12 +11,12 @@ public class GeneratorBuilder {
 
     private String packageName = "org.pojobook.generated";
     private GeneratorContext context;
-    private GeneratorType type = GeneratorType.EMBEDDED;
+    private GeneratorType type = GeneratorType.STANDALONE;
     private boolean primitiveNumericFields;
     private boolean disableValidation;
 
     public enum GeneratorType {
-        EMBEDDED,
+        STANDALONE,
         ANNOTATION
     }
 
@@ -41,7 +41,7 @@ public class GeneratorBuilder {
     }
 
     /**
-     * Set generator type (embedded or annotation-based).
+     * Set generator type (standalone or annotation-based).
      */
     public GeneratorBuilder withType(GeneratorType type) {
         this.type = type;
@@ -57,7 +57,7 @@ public class GeneratorBuilder {
     }
 
     /**
-     * Enable primitive numeric field generation for embedded generator output.
+     * Enable primitive numeric field generation for standalone generator output.
      */
     public GeneratorBuilder withPrimitiveNumericFields(boolean primitiveNumericFields) {
         this.primitiveNumericFields = primitiveNumericFields;
@@ -69,16 +69,16 @@ public class GeneratorBuilder {
      */
     public Object build() {
         return switch (type) {
-            case EMBEDDED -> buildEmbeddedGenerator();
+            case STANDALONE -> buildStandaloneGenerator();
             case ANNOTATION -> buildAnnotationGenerator();
         };
     }
 
     /**
-     * Build an embedded serialization generator.
+     * Build an standalone serialization generator.
      */
-    public EmbeddedSerializationPojoGenerator buildEmbeddedGenerator() {
-        EmbeddedSerializationPojoGenerator generator = new EmbeddedSerializationPojoGenerator(context);
+    public StandaloneSerializationPojoGenerator buildStandaloneGenerator() {
+        StandaloneSerializationPojoGenerator generator = new StandaloneSerializationPojoGenerator(context);
         return generator.withPackage(packageName)
                 .withPrimitiveNumericFields(primitiveNumericFields)
                 .withDisableValidation(disableValidation);
@@ -101,12 +101,12 @@ public class GeneratorBuilder {
     }
 
     /**
-     * Quick factory for embedded generator.
+     * Quick factory for standalone generator.
      */
-    public static EmbeddedSerializationPojoGenerator embeddedGenerator() {
+    public static StandaloneSerializationPojoGenerator standaloneGenerator() {
         return new GeneratorBuilder()
-                .withType(GeneratorType.EMBEDDED)
-                .buildEmbeddedGenerator();
+                .withType(GeneratorType.STANDALONE)
+                .buildStandaloneGenerator();
     }
 
     /**
@@ -121,11 +121,11 @@ public class GeneratorBuilder {
     /**
      * Quick factory with package name.
      */
-    public static EmbeddedSerializationPojoGenerator embeddedGenerator(String packageName) {
+    public static StandaloneSerializationPojoGenerator standaloneGenerator(String packageName) {
         return new GeneratorBuilder()
-                .withType(GeneratorType.EMBEDDED)
+                .withType(GeneratorType.STANDALONE)
                 .withPackageName(packageName)
-                .buildEmbeddedGenerator();
+                .buildStandaloneGenerator();
     }
 
     /**

@@ -115,7 +115,7 @@ public class CopybookMultiThreadedBenchmark {
     }
 
     // =====================================================================
-    // Embedded Serialization - Multi-threaded Group Tests
+    // Standalone Serialization - Multi-threaded Group Tests
     // =====================================================================
 
     /**
@@ -123,11 +123,11 @@ public class CopybookMultiThreadedBenchmark {
      * This simulates a realistic high-load scenario.
      */
     @Benchmark
-    @Group("embeddedConcurrent4")
+    @Group("standaloneConcurrent4")
     @GroupThreads(4)
-    public byte[] embeddedRoundTrip4Threads() throws Exception {
-        org.pojobook.samples.embedded.SampleCbk pojo =
-                org.pojobook.samples.embedded.SampleCbk.deserialize(copybookData, CHARSET);
+    public byte[] standaloneRoundTrip4Threads() throws Exception {
+        org.pojobook.samples.standalone.SampleCbk pojo =
+                org.pojobook.samples.standalone.SampleCbk.deserialize(copybookData, CHARSET);
         return pojo.serialize(CHARSET);
     }
 
@@ -136,11 +136,11 @@ public class CopybookMultiThreadedBenchmark {
      * Tests scalability under higher contention.
      */
     @Benchmark
-    @Group("embeddedConcurrent8")
+    @Group("standaloneConcurrent8")
     @GroupThreads(8)
-    public byte[] embeddedRoundTrip8Threads() throws Exception {
-        org.pojobook.samples.embedded.SampleCbk pojo =
-                org.pojobook.samples.embedded.SampleCbk.deserialize(copybookData, CHARSET);
+    public byte[] standaloneRoundTrip8Threads() throws Exception {
+        org.pojobook.samples.standalone.SampleCbk pojo =
+                org.pojobook.samples.standalone.SampleCbk.deserialize(copybookData, CHARSET);
         return pojo.serialize(CHARSET);
     }
 

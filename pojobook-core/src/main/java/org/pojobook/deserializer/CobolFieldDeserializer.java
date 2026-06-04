@@ -12,7 +12,7 @@ import java.nio.charset.Charset;
 /**
  * Helper class containing COBOL field deserialization methods.
  * This class is used by both CobolDeserializer (for runtime deserialization)
- * and EmbeddedSerializationPojoGenerator (for code generation).
+ * and StandaloneSerializationPojoGenerator (for code generation).
  */
 public class CobolFieldDeserializer {
 

@@ -70,9 +70,9 @@ public class GenerateMojo extends AbstractMojo {
      * Generator type to use for POJO generation.
      * Options:
      * - "annotation": Generates POJOs with annotations, requires external serializer
-     * - "embedded": Generates POJOs with embedded serialization/deserialization methods
+     * - "standalone": Generates POJOs with standalone serialization/deserialization methods
      */
-    @Parameter(property = "generatorType", defaultValue = "embedded")
+    @Parameter(property = "generatorType", defaultValue = "standalone")
     private String generatorType;
 
     /**
@@ -152,8 +152,8 @@ public class GenerateMojo extends AbstractMojo {
         getLog().info("Output file: " + outputFile.toAbsolutePath());
 
         // Generate the POJO using GeneratorBuilder
-        if ("embedded".equalsIgnoreCase(generatorType)) {
-            GeneratorBuilder.embeddedGenerator(packageName)
+        if ("standalone".equalsIgnoreCase(generatorType)) {
+            GeneratorBuilder.standaloneGenerator(packageName)
                     .withDisableValidation(disableValidation)
                     .generateToFile(definition, outputFile);
         } else {
@@ -294,9 +294,9 @@ public class GenerateMojo extends AbstractMojo {
 
         if (generatorType != null &&
                 !generatorType.equalsIgnoreCase("annotation") &&
-                !generatorType.equalsIgnoreCase("embedded")) {
+                !generatorType.equalsIgnoreCase("standalone")) {
             throw new MojoFailureException(
-                    "Invalid generatorType: " + generatorType + ". Must be 'annotation' or 'embedded'");
+                    "Invalid generatorType: " + generatorType + ". Must be 'annotation' or 'standalone'");
         }
     }
 

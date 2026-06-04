@@ -103,14 +103,14 @@
                 <executions>
                     <!-- Generate POJOs from all copybook files -->
                     <execution>
-                        <id>generate-embedded</id>
+                        <id>generate-standalone</id>
                         <goals>
                             <goal>generate</goal>
                         </goals>
                         <configuration>
                             <copybookFile>${project.basedir}/src/main/resources/copybook/*.cbl</copybookFile>
-                            <packageName>org.pojobook.samples.embedded</packageName>
-                            <generatorType>embedded</generatorType>
+                            <packageName>org.pojobook.samples.standalone</packageName>
+                            <generatorType>standalone</generatorType>
                         </configuration>
                     </execution>
                     <execution>

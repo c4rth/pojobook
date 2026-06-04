@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Test that setter validation works correctly for String fields.
- * Embedded POJOs include the same validation as annotation-based POJOs.
+ * Standalone POJOs include the same validation as annotation-based POJOs.
  */
 class SetterValidationTest {
 

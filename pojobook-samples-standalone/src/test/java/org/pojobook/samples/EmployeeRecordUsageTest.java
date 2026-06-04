@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for EmployeeRecord with embedded serialization.
+ * Tests for EmployeeRecord with standalone serialization.
  * Demonstrates usage of self-contained POJOs with no external dependencies.
  * Key differences from annotation-based approach:
  * - No PojoBook instance needed
@@ -41,7 +41,7 @@ class EmployeeRecordUsageTest {
         original.setPhoneNumber("555-123-4567");
         original.setEmail("jane.smith@company.com");
 
-        // When: Serialize to COBOL format using embedded method
+        // When: Serialize to COBOL format using standalone method
         byte[] cobolData = original.serialize(charset);
 
         // Then: Should produce binary data

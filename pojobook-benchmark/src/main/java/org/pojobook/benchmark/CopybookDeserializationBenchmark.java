@@ -22,7 +22,7 @@ import java.nio.charset.Charset;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JMH Benchmark comparing JRecord, Annotation-based POJOBook, and Embedded POJOBook.
+ * JMH Benchmark comparing JRecord, Annotation-based POJOBook, and Standalone POJOBook.
  */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -110,8 +110,8 @@ public class CopybookDeserializationBenchmark {
     }
 
     @Benchmark
-    public org.pojobook.samples.embedded.SampleCbk benchmarkEmbeddedDeserialization() throws Exception {
-        return org.pojobook.samples.embedded.SampleCbk.deserialize(copybookData, CHARSET);
+    public org.pojobook.samples.standalone.SampleCbk benchmarkStandaloneDeserialization() throws Exception {
+        return org.pojobook.samples.standalone.SampleCbk.deserialize(copybookData, CHARSET);
     }
 
     @Benchmark

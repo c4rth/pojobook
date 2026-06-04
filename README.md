@@ -1,7 +1,7 @@
 # PojoBook
 
 A modern Java library for converting between Java POJOs and COBOL Copybook formats, supporting both annotation-based and
-embedded serialization approaches.
+standalone serialization approaches.
 
 ## Overview
 
@@ -10,7 +10,7 @@ PojoBook simplifies the integration between Java applications and COBOL systems 
 - **Parsing COBOL Copybooks**: Reads and interprets COBOL copybook definitions
 - **Generating Java POJOs**: Automatically creates Java classes from copybook specifications
 - **Serialization/Deserialization**: Converts between Java objects and binary COBOL data formats
-- **Multiple Approaches**: Choose between annotation-based (reflection) or embedded (no reflection) serialization
+- **Multiple Approaches**: Choose between annotation-based (reflection) or standalone (no reflection) serialization
 - **Maven Integration**: Seamless code generation via Maven plugin
 
 PojoBook handles COBOL constructs including OCCURS clauses, REDEFINES, nested structures, and various data
@@ -23,8 +23,8 @@ The project consists of five modules:
 - **pojobook-core**: Core parser and serialization/deserialization engine (annotation-based approach)
 - **pojobook-generator**: POJO code generators from copybook definitions
 - **pojobook-maven-plugin**: Maven plugin for build-time code generation
-- **pojobook-annotation-samples**: Example usage with annotation-based approach
-- **pojobook-embedded-samples**: Example usage with embedded serialization approach
+- **pojobook-samples-annotation**: Example usage with annotation-based approach
+- **pojobook-samples-standalone**: Example usage with standalone serialization approach
 
 The **private-samples** modules contain internal tests and is not part of the public distribution.
 
@@ -76,9 +76,9 @@ byte[] cobolData = pojoBook.serialize(employee);
 EmployeeRecord deserialized = pojoBook.deserialize(cobolData, EmployeeRecord.class);
 ```
 
-### 2. Embedded Serialization Generation
+### 2. Standalone Serialization Generation
 
-Generates self-contained POJOs with embedded `serialize()` and `deserialize()` methods. No runtime dependencies on
+Generates self-contained POJOs with standalone `serialize()` and `deserialize()` methods. No runtime dependencies on
 reflection or external serialization libraries.
 
 **Characteristics:**
@@ -104,13 +104,13 @@ public class EmployeeRecord {
 
     public byte[] serialize() throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        // ... embedded serialization logic ...
+        // ... standalone serialization logic ...
         return baos.toByteArray();
     }
 
     public static EmployeeRecord deserialize(byte[] data) throws IOException {
         EmployeeRecord record = new EmployeeRecord();
-        // ... embedded deserialization logic ...
+        // ... standalone deserialization logic ...
         return record;
     }
 }
@@ -228,7 +228,7 @@ single execution:
         <!-- Generate from all .cpy files in the copybooks directory -->
         <copybookFile>src/main/resources/copybooks/*.cpy</copybookFile>
         <packageName>com.example.generated</packageName>
-        <generatorType>embedded</generatorType>
+        <generatorType>standalone</generatorType>
     </configuration>
 </execution>
 ```
@@ -244,10 +244,10 @@ single execution:
 
 #### Optional Parameters
 
-| Parameter         | Type   | Default                                                 | Description                                |
-|-------------------|--------|---------------------------------------------------------|--------------------------------------------|
-| `outputDirectory` | File   | `${project.build.directory}/generated-sources/pojobook` | Output directory for generated sources     |
-| `generatorType`   | String | `EMBEDDED`                                              | Generator type: `ANNOTATION` or `EMBEDDED` |
+| Parameter         | Type   | Default                                                 | Description                                  |
+|-------------------|--------|---------------------------------------------------------|----------------------------------------------|
+| `outputDirectory` | File   | `${project.build.directory}/generated-sources/pojobook` | Output directory for generated sources       |
+| `generatorType`   | String | `STANDALONE`                                            | Generator type: `ANNOTATION` or `STANDALONE` |
 
 ## Dependencies
 
@@ -297,7 +297,7 @@ Add to your `pom.xml`:
                     <configuration>
                         <copybookFile>src/main/resources/copybooks/employee.cpy</copybookFile>
                         <packageName>com.example.model</packageName>
-                        <generatorType>EMBEDDED</generatorType>
+                        <generatorType>STANDALONE</generatorType>
                     </configuration>
                 </execution>
             </executions>
@@ -310,8 +310,8 @@ Add to your `pom.xml`:
 
 The project includes two sample modules:
 
-- **pojobook-annotation-samples**: Demonstrates annotation-based approach with various copybook scenarios
-- **pojobook-embedded-samples**: Demonstrates embedded serialization with the same scenarios
+- **pojobook-samples-annotation**: Demonstrates annotation-based approach with various copybook scenarios
+- **pojobook-samples-standalone**: Demonstrates standalone serialization with the same scenarios
 
 Each module includes test cases showing:
 

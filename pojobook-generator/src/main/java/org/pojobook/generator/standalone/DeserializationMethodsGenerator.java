@@ -1,4 +1,4 @@
-package org.pojobook.generator.embedded;
+package org.pojobook.generator.standalone;
 
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.MethodSpec;

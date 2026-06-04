@@ -1,4 +1,4 @@
-package org.pojobook.generator.embedded;
+package org.pojobook.generator.standalone;
 
 import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.TypeSpec;

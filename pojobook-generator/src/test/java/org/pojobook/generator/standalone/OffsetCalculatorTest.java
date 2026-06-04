@@ -1,4 +1,4 @@
-package org.pojobook.generator.embedded;
+package org.pojobook.generator.standalone;
 
 import org.junit.jupiter.api.Test;
 import org.pojobook.CobolDataType;

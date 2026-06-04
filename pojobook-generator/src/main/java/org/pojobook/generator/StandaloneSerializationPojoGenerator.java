@@ -8,10 +8,10 @@ import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
 import org.pojobook.CobolDataType;
 import org.pojobook.generator.context.GeneratorContext;
-import org.pojobook.generator.embedded.ConstructorGenerator;
-import org.pojobook.generator.embedded.DeserializationMethodsGenerator;
-import org.pojobook.generator.embedded.OffsetCalculator;
-import org.pojobook.generator.embedded.SerializationMethodsGenerator;
+import org.pojobook.generator.standalone.ConstructorGenerator;
+import org.pojobook.generator.standalone.DeserializationMethodsGenerator;
+import org.pojobook.generator.standalone.OffsetCalculator;
+import org.pojobook.generator.standalone.SerializationMethodsGenerator;
 import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.FieldDefinition;
 
@@ -26,14 +26,14 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
- * Generates POJO classes with embedded serialization and deserialization methods.
+ * Generates POJO classes with standalone serialization and deserialization methods.
  * Uses GeneratorContext for centralized dependency management.
  */
-public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
+public class StandaloneSerializationPojoGenerator extends AbstractPojoGenerator {
 
     private String packageName = "org.pojobook.generated";
     
-    // Embedded-specific generators (from context)
+    // Standalone-specific generators (from context)
     private final OffsetCalculator offsetCalculator;
     private final ConstructorGenerator constructorGenerator;
     private final SerializationMethodsGenerator serializationGenerator;
@@ -43,7 +43,7 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
      * Constructor using default context.
      * Package-private - use GeneratorBuilder to create instances.
      */
-    EmbeddedSerializationPojoGenerator() {
+    StandaloneSerializationPojoGenerator() {
         this(new GeneratorContext());
     }
 
@@ -51,16 +51,16 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
      * Constructor with custom context (for dependency injection).
      * Package-private - use GeneratorBuilder to create instances.
      */
-    EmbeddedSerializationPojoGenerator(GeneratorContext context) {
+    StandaloneSerializationPojoGenerator(GeneratorContext context) {
         super(context);
-        // Get embedded-specific helpers from context
+        // Get standalone-specific helpers from context
         this.offsetCalculator = context.getOffsetCalculator();
         this.constructorGenerator = context.getConstructorGenerator();
         this.serializationGenerator = context.getSerializationGenerator();
         this.deserializationGenerator = context.getDeserializationGenerator(this);
     }
 
-    public EmbeddedSerializationPojoGenerator withPackage(String packageName) {
+    public StandaloneSerializationPojoGenerator withPackage(String packageName) {
         this.packageName = packageName;
         return this;
     }
@@ -69,7 +69,7 @@ public class EmbeddedSerializationPojoGenerator extends AbstractPojoGenerator {
      * Enable primitive numeric field generation for non-nullable numerics.
      * Default is false to preserve existing generated API compatibility.
      */
-    public EmbeddedSerializationPojoGenerator withPrimitiveNumericFields(boolean enabled) {
+    public StandaloneSerializationPojoGenerator withPrimitiveNumericFields(boolean enabled) {
         this.typeResolver.withPrimitiveNumericFields(enabled);
         return this;
     }

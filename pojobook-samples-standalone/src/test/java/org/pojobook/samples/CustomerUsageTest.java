@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Tests for CustomerRecord with embedded serialization.
+ * Tests for CustomerRecord with standalone serialization.
  * Demonstrates round-trip serialization without raw binary data.
  */
 public class CustomerUsageTest {

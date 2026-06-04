@@ -8,9 +8,9 @@
         <artifactId>pojobook-parent</artifactId>
         <version>${revision}</version>
     </parent>
-    <artifactId>pojobook-samples-embedded</artifactId>
+    <artifactId>pojobook-samples-standalone</artifactId>
     <packaging>jar</packaging>
-    <description>Sample applications demonstrating PojoBook usage with embedded serialization (no annotations, no
+    <description>Sample applications demonstrating PojoBook usage with standalone serialization (no annotations, no
         reflection)
     </description>
 
@@ -40,7 +40,7 @@
     </dependencies>
     <build>
         <plugins>
-            <!-- PojoBook Maven Plugin - Generate POJOs with EMBEDDED serialization -->
+            <!-- PojoBook Maven Plugin - Generate POJOs with STANDALONE serialization -->
             <plugin>
                 <groupId>org.pojobook</groupId>
                 <artifactId>pojobook-maven-plugin</artifactId>
@@ -54,7 +54,7 @@
                         <configuration>
                             <copybookFile>src/main/resources/copybooks/*.cpy</copybookFile>
                             <packageName>org.pojobook.samples.generated</packageName>
-                            <generatorType>embedded</generatorType>
+                            <generatorType>standalone</generatorType>
                         </configuration>
                     </execution>
 
@@ -67,7 +67,7 @@
                         <configuration>
                             <copybookFile>src/main/resources/copybooks/*.cbl</copybookFile>
                             <packageName>org.pojobook.samples.generated</packageName>
-                            <generatorType>embedded</generatorType>
+                            <generatorType>standalone</generatorType>
                         </configuration>
                     </execution>
                 </executions>

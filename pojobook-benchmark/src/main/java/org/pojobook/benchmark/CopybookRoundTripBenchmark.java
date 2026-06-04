@@ -112,10 +112,10 @@ public class CopybookRoundTripBenchmark {
     }
 
     @Benchmark
-    public byte[] benchmarkEmbeddedRoundTrip() throws Exception {
+    public byte[] benchmarkStandaloneRoundTrip() throws Exception {
         // Deserialize
-        org.pojobook.samples.embedded.SampleCbk pojo =
-                org.pojobook.samples.embedded.SampleCbk.deserialize(copybookData, CHARSET);
+        org.pojobook.samples.standalone.SampleCbk pojo =
+                org.pojobook.samples.standalone.SampleCbk.deserialize(copybookData, CHARSET);
         // Serialize
         return pojo.serialize(CHARSET);
     }

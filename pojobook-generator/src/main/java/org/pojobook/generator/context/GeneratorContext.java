@@ -6,10 +6,10 @@ import org.pojobook.generator.common.FieldValidator;
 import org.pojobook.generator.common.GetterSetterGenerator;
 import org.pojobook.generator.common.ObjectMethodsGenerator;
 import org.pojobook.generator.common.TypeResolver;
-import org.pojobook.generator.embedded.ConstructorGenerator;
-import org.pojobook.generator.embedded.DeserializationMethodsGenerator;
-import org.pojobook.generator.embedded.OffsetCalculator;
-import org.pojobook.generator.embedded.SerializationMethodsGenerator;
+import org.pojobook.generator.standalone.ConstructorGenerator;
+import org.pojobook.generator.standalone.DeserializationMethodsGenerator;
+import org.pojobook.generator.standalone.OffsetCalculator;
+import org.pojobook.generator.standalone.SerializationMethodsGenerator;
 
 /**
  * Central context managing all generator helpers and shared state.
@@ -27,7 +27,7 @@ public class GeneratorContext {
     private volatile ConditionNameMethodGenerator conditionNameMethodGenerator;
     private volatile ObjectMethodsGenerator objectMethodsGenerator;
     
-    // Embedded helpers (lazy-initialized)
+    // Standalone helpers (lazy-initialized)
     private volatile OffsetCalculator offsetCalculator;
     private volatile ConstructorGenerator constructorGenerator;
     private volatile SerializationMethodsGenerator serializationGenerator;
@@ -98,7 +98,7 @@ public class GeneratorContext {
         return objectMethodsGenerator;
     }
 
-    // Embedded helpers - lazy initialization
+    // Standalone helpers - lazy initialization
     public OffsetCalculator getOffsetCalculator() {
         if (offsetCalculator == null) {
             synchronized (this) {

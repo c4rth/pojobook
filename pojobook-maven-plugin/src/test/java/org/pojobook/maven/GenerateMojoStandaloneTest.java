@@ -17,9 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * Test for embedded serialization generator integration in GenerateMojo.
+ * Test for standalone serialization generator integration in GenerateMojo.
  */
-class GenerateMojoEmbeddedTest {
+class GenerateMojoStandaloneTest {
 
     @TempDir
     Path tempDir;
@@ -45,14 +45,14 @@ class GenerateMojoEmbeddedTest {
     }
 
     @Test
-    void testGenerateWithEmbeddedSerializer() throws Exception {
+    void testGenerateWithStandaloneSerializer() throws Exception {
         Path copybookFile = createTestCopybook();
         Path outputDir = tempDir.resolve("target/generated-sources/pojobook");
 
         setMojoField("copybookFile", copybookFile.toString());
         setMojoField("packageName", "com.example.test");
         setMojoField("outputDirectory", outputDir.toFile());
-        setMojoField("generatorType", "embedded");
+        setMojoField("generatorType", "standalone");
 
         mojo.execute();
 
@@ -69,13 +69,13 @@ class GenerateMojoEmbeddedTest {
         // Read generated content
         String content = Files.readString(generatedFile);
 
-        // Verify it's using embedded serialization (no annotations)
+        // Verify it's using standalone serialization (no annotations)
         assertFalse(content.contains("@CobolField"),
-                "Embedded generator should not use @CobolField annotation");
+                "Standalone generator should not use @CobolField annotation");
         assertFalse(content.contains("@CobolRecord"),
-                "Embedded generator should not use @CobolRecord annotation");
+                "Standalone generator should not use @CobolRecord annotation");
 
-        // Verify embedded methods exist
+        // Verify standalone methods exist
         assertTrue(content.contains("public int serializedSize()"),
                 "Should expose record serialized size");
         assertTrue(content.contains("public void serialize(byte[] buffer)"),
@@ -83,11 +83,11 @@ class GenerateMojoEmbeddedTest {
         assertTrue(content.contains("public void serialize(byte[] buffer, int offset)"),
                 "Should have serialize(byte[], int) overload for buffer reuse");
         assertTrue(content.contains("public byte[] serialize(Charset charset)"),
-                "Should have embedded serialize() method");
+                "Should have standalone serialize() method");
         assertTrue(content.contains("public static EmployeeRecord deserialize(byte[] data, Charset charset)"),
-                "Should have embedded deserialize() method");
+                "Should have standalone deserialize() method");
         assertFalse(content.contains("catch (Exception e)"),
-                "Embedded generator should not emit blanket catch(Exception) in hot paths");
+                "Standalone generator should not emit blanket catch(Exception) in hot paths");
     }
 
 

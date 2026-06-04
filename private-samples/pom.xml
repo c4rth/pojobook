@@ -12,10 +12,10 @@
     <packaging>jar</packaging>
 
     <properties>
-        <jackson.version>2.19.2</jackson.version>
-        <lombok.version>1.18.42</lombok.version>
+        <jackson.version>2.22.0</jackson.version>
+        <lombok.version>1.18.46</lombok.version>
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
-        <commons-lang3.version>3.19.0</commons-lang3.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <maven-complier.version>3.8.1</maven-complier.version>
         <maven.deploy.skip>true</maven.deploy.skip>
@@ -118,21 +118,21 @@
                 </configuration>
             </plugin>
 
-            <!-- PojoBook Maven Plugin - Generate POJOs with EMBEDDED serialization -->
+            <!-- PojoBook Maven Plugin - Generate POJOs with STANDALONE serialization -->
             <plugin>
                 <groupId>org.pojobook</groupId>
                 <artifactId>pojobook-maven-plugin</artifactId>
                 <executions>
                     <!-- Generate POJOs from all copybook files -->
                     <execution>
-                        <id>generate-embedded</id>
+                        <id>generate-standalone</id>
                         <goals>
                             <goal>generate</goal>
                         </goals>
                         <configuration>
                             <copybookFile>${project.basedir}/src/test/resources/copybook/*.cbl</copybookFile>
-                            <packageName>org.pojobook.samples.embedded</packageName>
-                            <generatorType>embedded</generatorType>
+                            <packageName>org.pojobook.samples.standalone</packageName>
+                            <generatorType>standalone</generatorType>
                         </configuration>
                     </execution>
                     <execution>
