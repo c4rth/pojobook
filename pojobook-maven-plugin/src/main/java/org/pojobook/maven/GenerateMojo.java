@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.regex.Pattern;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -170,15 +171,13 @@ public class GenerateMojo extends AbstractMojo {
     private List<File> resolveCopybookFiles() throws IOException {
         List<File> files = new ArrayList<>();
 
-        // Build absolute path
-        Path basePath = new File(copybookFile).isAbsolute()
-                ? Paths.get(copybookFile)
-                : project.getBasedir().toPath().resolve(copybookFile);
-
         // Check if pattern contains wildcards
         if (copybookFile.contains("*") || copybookFile.contains("?")) {
-            files.addAll(resolveWildcardPattern(basePath.toString()));
+            files.addAll(resolveWildcardPattern(copybookFile));
         } else {
+            Path basePath = new File(copybookFile).isAbsolute()
+                    ? Paths.get(copybookFile)
+                    : project.getBasedir().toPath().resolve(copybookFile);
             File singleFile = basePath.toFile();
             if (singleFile.exists() && singleFile.isFile()) {
                 files.add(singleFile);
@@ -193,11 +192,15 @@ public class GenerateMojo extends AbstractMojo {
      */
     private List<File> resolveWildcardPattern(String pattern) throws IOException {
         List<File> matchedFiles = new ArrayList<>();
+        String normalizedPattern = normalizeSeparators(pattern);
+        String absolutePattern = new File(pattern).isAbsolute()
+                ? normalizedPattern
+                : normalizeSeparators(new File(project.getBasedir(), pattern).getAbsolutePath());
 
         // Find the base directory (part before first wildcard)
         int firstWildcard = Math.min(
-                pattern.indexOf('*') != -1 ? pattern.indexOf('*') : Integer.MAX_VALUE,
-                pattern.indexOf('?') != -1 ? pattern.indexOf('?') : Integer.MAX_VALUE
+                absolutePattern.indexOf('*') != -1 ? absolutePattern.indexOf('*') : Integer.MAX_VALUE,
+                absolutePattern.indexOf('?') != -1 ? absolutePattern.indexOf('?') : Integer.MAX_VALUE
         );
 
         if (firstWildcard == Integer.MAX_VALUE) {
@@ -205,13 +208,10 @@ public class GenerateMojo extends AbstractMojo {
         }
 
         // Find the last directory separator before the wildcard
-        int lastSeparator = Math.max(
-                pattern.lastIndexOf('/', firstWildcard),
-                pattern.lastIndexOf('\\', firstWildcard)
-        );
+        int lastSeparator = absolutePattern.lastIndexOf('/', firstWildcard);
 
-        String baseDir = lastSeparator > 0 ? pattern.substring(0, lastSeparator) : ".";
-        String filePattern = pattern.substring(lastSeparator + 1);
+        String baseDir = lastSeparator >= 0 ? absolutePattern.substring(0, lastSeparator) : ".";
+        String filePattern = lastSeparator >= 0 ? absolutePattern.substring(lastSeparator + 1) : absolutePattern;
 
         Path basePath = Paths.get(baseDir);
         if (!Files.exists(basePath) || !Files.isDirectory(basePath)) {
@@ -219,15 +219,12 @@ public class GenerateMojo extends AbstractMojo {
             return matchedFiles;
         }
 
-        // Check if pattern includes ** (recursive)
-        boolean recursive = filePattern.contains("**");
-        String simplePattern = recursive
-                ? filePattern.replace("**" + File.separator, "").replace("**", "")
-                : filePattern;
+        Pattern regex = Pattern.compile(globToRegex(filePattern));
 
-        try (Stream<Path> paths = recursive ? Files.walk(basePath) : Files.list(basePath)) {
+        try (Stream<Path> paths = Files.walk(basePath)) {
             paths.filter(Files::isRegularFile)
-                    .filter(p -> matchesPattern(p.getFileName().toString(), simplePattern))
+                    .filter(p -> regex.matcher(normalizeSeparators(basePath.relativize(p).toString())).matches())
+                    .sorted()
                     .forEach(p -> matchedFiles.add(p.toFile()));
         }
 
@@ -237,12 +234,46 @@ public class GenerateMojo extends AbstractMojo {
     /**
      * Check if filename matches pattern with wildcards.
      */
-    private boolean matchesPattern(String filename, String pattern) {
-        // Convert glob pattern to regex
-        String regex = pattern.replace(".", "\\.")
-                .replace("*", ".*")
-                .replace("?", ".");
-        return filename.matches(regex);
+    private String normalizeSeparators(String value) {
+        return value.replace('\\', '/');
+    }
+
+    /**
+     * Convert a glob pattern to a regex using '/' as the directory separator.
+     */
+    private String globToRegex(String pattern) {
+        String normalizedPattern = normalizeSeparators(pattern);
+        StringBuilder regex = new StringBuilder("^");
+
+        for (int i = 0; i < normalizedPattern.length(); i++) {
+            char ch = normalizedPattern.charAt(i);
+
+            if (ch == '*') {
+                boolean doubleStar = i + 1 < normalizedPattern.length() && normalizedPattern.charAt(i + 1) == '*';
+                if (doubleStar) {
+                    boolean followedBySlash = i + 2 < normalizedPattern.length() && normalizedPattern.charAt(i + 2) == '/';
+                    regex.append(followedBySlash ? "(?:.*/)?" : ".*");
+                    i += followedBySlash ? 2 : 1;
+                } else {
+                    regex.append("[^/]*");
+                }
+                continue;
+            }
+
+            if (ch == '?') {
+                regex.append("[^/]");
+                continue;
+            }
+
+            if (".[]{}()+-^$|".indexOf(ch) >= 0) {
+                regex.append('\\');
+            }
+
+            regex.append(ch);
+        }
+
+        regex.append('$');
+        return regex.toString();
     }
 
     /**

@@ -124,6 +124,43 @@ class GenerateMojoAnnotationTest {
     }
 
     @Test
+    void testGenerate_WithRelativeWildcardPattern() throws Exception {
+        Path copybookDir = tempDir.resolve("src/main/resources/copybooks");
+        createTestCopybook(copybookDir.resolve("employee-record.cpy"), "EMPLOYEE-RECORD", "EMP-ID");
+        createTestCopybook(copybookDir.resolve("department-record.cpy"), "DEPARTMENT-RECORD", "DEPT-ID");
+        Path outputDir = tempDir.resolve("target/generated-sources/pojobook");
+
+        setMojoField("copybookFile", "src/main/resources/copybooks/*.cpy");
+        setMojoField("packageName", "com.example.test");
+        setMojoField("outputDirectory", outputDir.toFile());
+        setMojoField("generatorType", "annotation");
+
+        assertDoesNotThrow(() -> mojo.execute());
+
+        Path packagePath = outputDir.resolve("com/example/test");
+        assertTrue(Files.exists(packagePath), "Package directory should be created for wildcard matches");
+        assertTrue(Files.exists(packagePath.resolve("EmployeeRecord.java")), "Should generate EmployeeRecord.java");
+        assertTrue(Files.exists(packagePath.resolve("DepartmentRecord.java")), "Should generate DepartmentRecord.java");
+    }
+
+    @Test
+    void testGenerate_WithRecursiveBackslashWildcardPattern() throws Exception {
+        Path copybookDir = tempDir.resolve("src/main/resources/copybooks/nested");
+        createTestCopybook(copybookDir.resolve("nested-record.cpy"), "NESTED-RECORD", "NESTED-ID");
+        Path outputDir = tempDir.resolve("target/generated-sources/pojobook");
+
+        setMojoField("copybookFile", "src\\main\\resources\\copybooks\\**\\*.cpy");
+        setMojoField("packageName", "com.example.test");
+        setMojoField("outputDirectory", outputDir.toFile());
+        setMojoField("generatorType", "annotation");
+
+        assertDoesNotThrow(() -> mojo.execute());
+
+        Path generatedFile = outputDir.resolve("com/example/test/NestedRecord.java");
+        assertTrue(Files.exists(generatedFile), "Should generate files matched by recursive backslash wildcard pattern");
+    }
+
+    @Test
     void testSkip() throws Exception {
         Path copybookFile = createTestCopybook();
 
@@ -140,14 +177,18 @@ class GenerateMojoAnnotationTest {
      * Create a test copybook file.
      */
     private Path createTestCopybook() throws IOException {
-        Path copybookFile = tempDir.resolve("employee-record.cpy");
-        String copybookContent = """
-                   01  EMPLOYEE-RECORD.
-                       05  EMP-ID              PIC 9(6).
+        return createTestCopybook(tempDir.resolve("employee-record.cpy"), "EMPLOYEE-RECORD", "EMP-ID");
+    }
+
+    private Path createTestCopybook(Path copybookFile, String recordName, String idFieldName) throws IOException {
+        Files.createDirectories(copybookFile.getParent());
+        String copybookContent = String.format("""
+                   01  %s.
+                       05  %s              PIC 9(6).
                        05  EMP-NAME            PIC X(30).
                        05  EMP-SALARY          PIC 9(7)V99 COMP-3.
                        05  EMP-DEPT            PIC X(10).
-                """;
+                """, recordName, idFieldName);
         Files.writeString(copybookFile, copybookContent);
         return copybookFile;
     }
