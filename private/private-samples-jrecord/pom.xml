@@ -5,39 +5,27 @@
 
     <parent>
         <groupId>org.pojobook</groupId>
-        <artifactId>pojobook-parent</artifactId>
+        <artifactId>private-parent</artifactId>
         <version>${revision}</version>
+        <relativePath>../private-parent/pom.xml</relativePath>
     </parent>
-    <artifactId>pojobook-benchmark</artifactId>
+    <artifactId>private-samples-jrecord</artifactId>
     <packaging>jar</packaging>
 
     <properties>
         <maven.deploy.skip>true</maven.deploy.skip>
-        
-        <!-- Dependencies versions -->
-        <lombok.version>1.18.46</lombok.version>
-        <commons-lang3.version>3.20.0</commons-lang3.version>
-        <jrecord.version>0.93.3</jrecord.version>
-        <jmh.version>1.37</jmh.version>
-        
-        <!-- Plugin versions -->
-        <exec-maven-plugin.version>3.1.0</exec-maven-plugin.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>net.sf</groupId>
             <artifactId>jrecord</artifactId>
-            <version>${jrecord.version}</version>
             <scope>system</scope>
-            <systemPath>${project.basedir}/../jrecord-lib/JRecord.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>net.sf</groupId>
             <artifactId>jrecord-cb2xml</artifactId>
-            <version>${jrecord.version}</version>
             <scope>system</scope>
-            <systemPath>${project.basedir}/../jrecord-lib/cb2xml.jar</systemPath>
         </dependency>
         <dependency>
             <groupId>org.pojobook</groupId>
@@ -54,28 +42,45 @@
         </dependency>
 
         <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
-            <version>${commons-lang3.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>${lombok.version}</version>
             <scope>provided</scope>
         </dependency>
 
-        <!-- JMH Benchmarking -->
         <dependency>
-            <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-core</artifactId>
-            <version>${jmh.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-generator-annprocess</artifactId>
-            <version>${jmh.version}</version>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -85,21 +90,8 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                            <version>${lombok.version}</version>
-                        </path>
-                        <path>
-                            <groupId>org.openjdk.jmh</groupId>
-                            <artifactId>jmh-generator-annprocess</artifactId>
-                            <version>${jmh.version}</version>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
             </plugin>
+            
             <plugin>
                 <groupId>org.pojobook</groupId>
                 <artifactId>pojobook-maven-plugin</artifactId>
@@ -111,7 +103,7 @@
                             <goal>generate</goal>
                         </goals>
                         <configuration>
-                            <copybookFile>${project.basedir}/src/main/resources/copybook/*.cbl</copybookFile>
+                            <copybookFile>${project.basedir}/src/test/resources/copybook/*.cbl</copybookFile>
                             <packageName>org.pojobook.samples.standalone</packageName>
                             <generatorType>standalone</generatorType>
                         </configuration>
@@ -122,21 +114,13 @@
                             <goal>generate</goal>
                         </goals>
                         <configuration>
-                            <copybookFile>${project.basedir}/src/main/resources/copybook/*.cbl</copybookFile>
+                            <copybookFile>${project.basedir}/src/test/resources/copybook/*.cbl</copybookFile>
                             <packageName>org.pojobook.samples.annotation</packageName>
                             <generatorType>annotation</generatorType>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
-
-            <!-- Exec plugin for running benchmarks -->
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>exec-maven-plugin</artifactId>
-                <version>${exec-maven-plugin.version}</version>
-            </plugin>
-
         </plugins>
     </build>
 </project>

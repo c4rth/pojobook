@@ -43,11 +43,12 @@
         <module>pojobook-core</module>
         <module>pojobook-generator</module>
         <module>pojobook-maven-plugin</module>
-        <module>pojobook-samples-annotation</module>
-        <module>pojobook-samples-standalone</module>
-        <module>pojobook-benchmark</module>
-        <module>private-samples-jrecord</module>
-        <module>private-samples</module>
+        <module>samples/pojobook-samples-annotation</module>
+        <module>samples/pojobook-samples-standalone</module>
+        <module>samples/pojobook-benchmark</module>
+        <module>private/private-parent</module>
+        <module>private/private-samples-jrecord</module>
+        <module>private/private-samples</module>
     </modules>
 
 
