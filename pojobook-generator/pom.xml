@@ -15,6 +15,10 @@
 
     <description>POJO generator from COBOL copybook definitions</description>
 
+    <properties>
+        <javapoet.version>0.16.0</javapoet.version>
+    </properties>
+
     <dependencies>
         <!-- Depend on the serializer module -->
         <dependency>
@@ -26,6 +30,7 @@
         <dependency>
             <groupId>com.palantir.javapoet</groupId>
             <artifactId>javapoet</artifactId>
+            <version>${javapoet.version}</version>
         </dependency>
 
         <!-- SLF4J API -->
