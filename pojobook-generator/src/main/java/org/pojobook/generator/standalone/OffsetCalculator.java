@@ -9,10 +9,15 @@ import org.pojobook.parser.FieldDefinition;
 import javax.lang.model.element.Modifier;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
  * Calculates field sizes and generates offset constants for efficient serialization.
+ * <p>
+ * REDEFINES-aware: fields declared with a {@code REDEFINES} clause reuse the storage
+ * offset of the field they redefine instead of appending additional space. The overall
+ * size of a redefined region is the maximum extent reached by any of its alternate views.
  */
 public class OffsetCalculator {
 
@@ -46,16 +51,29 @@ public class OffsetCalculator {
      * Add static offset fields for efficient serialization/deserialization.
      */
     public void addOffsetFields(TypeSpec.Builder builder, List<FieldNode> fieldTree) {
-        addOffsetFieldsWithStartOffset(builder, fieldTree, 0);
+        layout(builder, fieldTree, 0, new HashMap<>());
     }
 
     /**
-     * Add offset fields starting from a given offset (used for both top-level and nested fields).
+     * Lay out a list of sibling fields, optionally emitting offset/size constants to a builder.
+     * <p>
+     * REDEFINES fields rewind the layout cursor back to the offset of the field they redefine,
+     * so alternate views share the same storage region instead of being appended sequentially.
+     * The returned value is the maximum offset reached by any field (or nested REDEFINES branch)
+     * processed, which represents the true end of this group of siblings.
+     *
+     * @param builder      target builder to receive offset/size constants, or {@code null} to skip emission
+     * @param nodes        sibling field nodes to lay out, in declaration order
+     * @param startOffset  offset at which the first field begins
+     * @param nameToOffset shared map of COBOL field name (normalized) to its start offset, used to
+     *                     resolve REDEFINES targets
+     * @return the maximum offset reached (i.e. the end of the laid-out region)
      */
-    private int addOffsetFieldsWithStartOffset(TypeSpec.Builder builder, List<FieldNode> fieldTree, int startOffset) {
-        int currentOffset = startOffset;
+    private int layout(TypeSpec.Builder builder, List<FieldNode> nodes, int startOffset, Map<String, Integer> nameToOffset) {
+        int cursor = startOffset;
+        int maxEnd = startOffset;
 
-        for (FieldNode node : fieldTree) {
+        for (FieldNode node : nodes) {
             FieldDefinition field = node.getField();
 
             // Skip 88-level condition names - they don't have offsets
@@ -63,31 +81,54 @@ public class OffsetCalculator {
                 continue;
             }
 
-            String fieldName = fieldNameTracker.toUniqueFieldName(field);
+            if (field.getRedefines() != null && !field.getRedefines().isEmpty()) {
+                cursor = nameToOffset.getOrDefault(normalizeName(field.getRedefines()), cursor);
+            }
+
+            int fieldOffset = cursor;
+            int size;
 
             if (field.isGroup() && field.getOccurs() == 1 && !node.getChildren().isEmpty()) {
-                // Flattened group - process children recursively
-                currentOffset = addOffsetFieldsWithStartOffset(builder, node.getChildren(), currentOffset);
+                // Flattened group - process children recursively, starting at this field's offset
+                int childEnd = layout(builder, node.getChildren(), fieldOffset, nameToOffset);
+                size = childEnd - fieldOffset;
             } else if (field.isGroup() && field.getOccurs() > 1 && !node.getChildren().isEmpty()) {
                 // Nested class array
                 int elementSize = calculateNestedClassSize(node.getChildren());
-                addOffsetConstant(builder, fieldName, currentOffset);
-                addSizeConstant(builder, fieldName, elementSize);
-                currentOffset += elementSize * field.getOccurs();
+                if (builder != null) {
+                    String fieldName = fieldNameTracker.toUniqueFieldName(field);
+                    addOffsetConstant(builder, fieldName, fieldOffset);
+                    addSizeConstant(builder, fieldName, elementSize);
+                }
+                size = elementSize * field.getOccurs();
             } else {
                 // Simple field or primitive array
                 int fieldSize = calculateFieldSize(field);
-                addOffsetConstant(builder, fieldName, currentOffset);
-
-                if (field.getOccurs() > 1) {
-                    addSizeConstant(builder, fieldName, fieldSize);
+                if (builder != null) {
+                    String fieldName = fieldNameTracker.toUniqueFieldName(field);
+                    addOffsetConstant(builder, fieldName, fieldOffset);
+                    if (field.getOccurs() > 1) {
+                        addSizeConstant(builder, fieldName, fieldSize);
+                    }
                 }
+                size = fieldSize * Math.max(1, field.getOccurs());
+            }
 
-                currentOffset += fieldSize * Math.max(1, field.getOccurs());
+            if (!field.isFiller() && field.getName() != null) {
+                nameToOffset.put(normalizeName(field.getName()), fieldOffset);
+            }
+
+            cursor = fieldOffset + size;
+            if (cursor > maxEnd) {
+                maxEnd = cursor;
             }
         }
 
-        return currentOffset;
+        return maxEnd;
+    }
+
+    private String normalizeName(String name) {
+        return name.toUpperCase(Locale.ROOT);
     }
 
     /**
@@ -167,24 +208,12 @@ public class OffsetCalculator {
     }
 
     /**
-     * Calculate the total size in bytes of a nested class.
+     * Calculate the total size in bytes of a nested class (or of a full field tree, when
+     * called with the top-level list). REDEFINES-aware: alternate views share storage
+     * instead of accumulating additional space.
      */
     public int calculateNestedClassSize(List<FieldNode> children) {
-        int totalSize = 0;
-        for (FieldNode child : children) {
-            FieldDefinition field = child.getField();
-
-            if (field.isGroup() && field.getOccurs() > 1 && !child.getChildren().isEmpty()) {
-                int elementSize = calculateNestedClassSize(child.getChildren());
-                totalSize += elementSize * field.getOccurs();
-            } else if (field.isGroup() && field.getOccurs() == 1 && !child.getChildren().isEmpty()) {
-                totalSize += calculateNestedClassSize(child.getChildren());
-            } else {
-                int fieldSize = calculateFieldSize(field);
-                totalSize += fieldSize * field.getOccurs();
-            }
-        }
-        return totalSize;
+        return layout(null, children, 0, new HashMap<>());
     }
 }
 

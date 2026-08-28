@@ -14,6 +14,8 @@ import org.pojobook.parser.CopybookDefinition;
 import org.pojobook.parser.FieldDefinition;
 
 import javax.lang.model.element.Modifier;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +33,10 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
     
     // Annotation-specific helper
     private final CobolAnnotationGenerator annotationGenerator;
+
+    // Stack of REDEFINES overrides resolved for the class scope currently being generated
+    // (see RedefinesResolver). Scoped per class (top-level record or nested OCCURS class).
+    private final Deque<Map<FieldDefinition, String>> redefinesOverridesStack = new ArrayDeque<>();
 
     /**
      * Constructor using default context.
@@ -57,11 +63,14 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
     @Override
     public String generate(CopybookDefinition definition) {
         fieldNameTracker.reset();
+        redefinesOverridesStack.clear();
 
         String className = resolveClassName(definition.getRecordName());
         List<FieldNode> fieldTree = FieldNode.buildTree(definition.getFields());
 
+        redefinesOverridesStack.push(RedefinesResolver.resolve(fieldTree));
         TypeSpec classSpec = buildClassSpec(className, fieldTree);
+        redefinesOverridesStack.pop();
 
         return JavaFile.builder(packageName, classSpec)
                 .build()
@@ -114,6 +123,7 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
     @Override
     protected TypeSpec buildNestedClass(String className, FieldNode node) {
         fieldNameTracker.push();
+        redefinesOverridesStack.push(RedefinesResolver.resolve(node.getChildren()));
 
         TypeSpec.Builder builder = TypeSpec.classBuilder(className)
                 .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
@@ -137,6 +147,7 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
 
         childNestedClasses.values().forEach(builder::addType);
 
+        redefinesOverridesStack.pop();
         fieldNameTracker.pop();
         return builder.build();
     }
@@ -151,6 +162,15 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
     }
 
     /**
+     * Resolve the effective REDEFINES target for a field within the current class scope.
+     */
+    private String resolveRedefines(FieldDefinition field) {
+        Map<FieldDefinition, String> overrides = redefinesOverridesStack.peek();
+        String override = overrides == null ? null : overrides.get(field);
+        return override != null ? override : field.getRedefines();
+    }
+
+    /**
      * Create simple field spec with COBOL annotation.
      * Fields are initialized at declaration.
      */
@@ -160,7 +180,7 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
         String defaultValue = getDefaultValue(field);
 
         return FieldSpec.builder(getJavaType(field), fieldName, Modifier.PRIVATE)
-                .addAnnotation(annotationGenerator.createCobolFieldAnnotation(field))
+                .addAnnotation(annotationGenerator.createCobolFieldAnnotation(field, resolveRedefines(field)))
                 .initializer(defaultValue)
                 .build();
     }
@@ -176,13 +196,14 @@ public class AnnotationPojoGenerator extends AbstractPojoGenerator {
         TypeName fieldType = ArrayTypeName.of(ClassName.bestGuess(className));
 
         return FieldSpec.builder(fieldType, fieldName, Modifier.PRIVATE)
-                .addAnnotation(annotationGenerator.createCobolFieldAnnotation(field))
+                .addAnnotation(annotationGenerator.createCobolFieldAnnotation(field, resolveRedefines(field)))
                 .initializer("new $L[$L]", className, field.getOccurs())
                 .build();
     }
 
 
     /**
+
      * Add constructor to builder.
      */
     private void addConstructorToBuilder(BuilderContext context) {

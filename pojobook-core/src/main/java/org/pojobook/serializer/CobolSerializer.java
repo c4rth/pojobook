@@ -23,11 +23,18 @@ public class CobolSerializer {
 
     private static final Logger logger = LoggerFactory.getLogger(CobolSerializer.class);
 
-    // Cache for field metadata to avoid repeated reflection and prevent classloader leaks
-    private static final ClassValue<List<FieldMetadata>> FIELD_CACHE = new ClassValue<>() {
+    /**
+     * Cached, REDEFINES-aware layout for a class: field metadata (including offset) plus
+     * the total serialized size of the class.
+     */
+    private record ClassLayout(List<FieldMetadata> fields, int totalSize) {
+    }
+
+    // Cache for field metadata/layout to avoid repeated reflection and prevent classloader leaks
+    private static final ClassValue<ClassLayout> FIELD_CACHE = new ClassValue<>() {
         @Override
-        protected List<FieldMetadata> computeValue(Class<?> clazz) {
-            return computeFieldMetadataStatic(clazz);
+        protected ClassLayout computeValue(Class<?> clazz) {
+            return computeClassLayoutStatic(clazz);
         }
     };
 
@@ -46,10 +53,12 @@ public class CobolSerializer {
     /**
      * Cached field metadata for performance.
      *
+     * @param offset       start offset of this field within its enclosing class/record, computed
+     *                     with REDEFINES awareness (alternate views share the same offset)
      * @param scaleFactor pre-computed {@code BigDecimal.TEN.pow(decimalDigits)} for COMP-3 / ZONED-DECIMAL
      *                    fields with decimal digits, or {@code null} if no scaling is needed
      */
-    private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength,
+    private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength, int offset,
                                  BigDecimal scaleFactor, boolean isNumericPicture) {
         public FieldMetadata {
             field.setAccessible(true);
@@ -66,11 +75,10 @@ public class CobolSerializer {
     public byte[] serialize(Object pojo, Charset charset) throws SerializationException {
         validatePojo(pojo);
 
-        List<FieldMetadata> fields = getFieldMetadata(pojo.getClass());
-        int totalSize = calculateTotalSize(fields);
+        ClassLayout layout = getClassLayout(pojo.getClass());
 
-        byte[] buffer = new byte[totalSize];
-        serializeFields(pojo, fields, buffer, 0, charset);
+        byte[] buffer = new byte[layout.totalSize()];
+        serializeFields(pojo, layout.fields(), buffer, 0, charset);
         return buffer;
     }
 
@@ -79,85 +87,89 @@ public class CobolSerializer {
      */
     private void serializeFields(Object pojo, List<FieldMetadata> fields, byte[] buffer,
                                  int startOffset, Charset charset) throws SerializationException {
-        int offset = startOffset;
         for (FieldMetadata fieldMeta : fields) {
-            writeFieldDirect(fieldMeta, pojo, buffer, offset, charset);
-            offset += fieldMeta.fieldSize;
+            writeFieldDirect(fieldMeta, pojo, buffer, startOffset + fieldMeta.offset, charset);
         }
+    }
+
+    /**
+     * Get cached class layout or compute and cache it.
+     */
+    private ClassLayout getClassLayout(Class<?> clazz) {
+        return FIELD_CACHE.get(clazz);
     }
 
     /**
      * Get cached field metadata or compute and cache it.
      */
     private List<FieldMetadata> getFieldMetadata(Class<?> clazz) {
-        return FIELD_CACHE.get(clazz);
+        return getClassLayout(clazz).fields();
     }
 
     /**
-     * Compute field metadata for a class.
+     * Compute field metadata and REDEFINES-aware layout for a class.
      * Uses {@link CobolFieldUtil#calculateFieldLength} for correct byte sizes across all COBOL types.
      */
-    private static List<FieldMetadata> computeFieldMetadataStatic(Class<?> clazz) {
-        return Arrays.stream(clazz.getDeclaredFields())
+    private static ClassLayout computeClassLayoutStatic(Class<?> clazz) {
+        Field[] declaredFields = Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(CobolField.class))
-                .map(f -> {
-                    CobolField annotation = f.getAnnotation(CobolField.class);
+                .toArray(Field[]::new);
 
-                    int baseLength;
-                    Class<?> fieldType = f.getType();
-                    if (fieldType.isArray() && isNestedClassType(fieldType.getComponentType())) {
-                        baseLength = computeNestedClassSize(fieldType.getComponentType());
-                    } else {
-                        baseLength = CobolFieldUtil.calculateFieldLength(annotation);
-                    }
+        int n = declaredFields.length;
+        CobolField[] annotations = new CobolField[n];
+        int[] baseLengths = new int[n];
+        int[] sizes = new int[n];
+        String[] names = new String[n];
+        String[] redefinesTargets = new String[n];
 
-                    int size = baseLength * Math.max(1, annotation.occurs());
+        for (int i = 0; i < n; i++) {
+            Field f = declaredFields[i];
+            CobolField annotation = f.getAnnotation(CobolField.class);
+            annotations[i] = annotation;
 
-                    // Pre-compute scale factor for COMP-3 / ZONED-DECIMAL with decimal digits
-                    BigDecimal scaleFactor = null;
-                    if (annotation.decimalDigits() > 0) {
-                        var type = annotation.type();
-                        if (type == org.pojobook.CobolDataType.COMP_3
-                                || type == org.pojobook.CobolDataType.PACKED_DECIMAL
-                                || type == org.pojobook.CobolDataType.ZONED_DECIMAL) {
-                            scaleFactor = BigDecimal.TEN.pow(annotation.decimalDigits());
-                        }
-                    }
+            int baseLength;
+            Class<?> fieldType = f.getType();
+            if (fieldType.isArray() && isNestedClassType(fieldType.getComponentType())) {
+                baseLength = computeNestedClassSize(fieldType.getComponentType());
+            } else {
+                baseLength = CobolFieldUtil.calculateFieldLength(annotation);
+            }
+            baseLengths[i] = baseLength;
+            sizes[i] = baseLength * Math.max(1, annotation.occurs());
+            names[i] = annotation.name().isEmpty() ? f.getName() : annotation.name();
+            redefinesTargets[i] = annotation.redefines();
+        }
 
-                    return new FieldMetadata(f, annotation, size, baseLength, scaleFactor,
-                            isNumericPicture(annotation.picture()));
-                })
-                .toList();
+        CobolFieldUtil.LayoutResult layout = CobolFieldUtil.computeLayout(names, redefinesTargets, sizes);
+
+        List<FieldMetadata> fields = new java.util.ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            CobolField annotation = annotations[i];
+
+            // Pre-compute scale factor for COMP-3 / ZONED-DECIMAL with decimal digits
+            BigDecimal scaleFactor = null;
+            if (annotation.decimalDigits() > 0) {
+                var type = annotation.type();
+                if (type == org.pojobook.CobolDataType.COMP_3
+                        || type == org.pojobook.CobolDataType.PACKED_DECIMAL
+                        || type == org.pojobook.CobolDataType.ZONED_DECIMAL) {
+                    scaleFactor = BigDecimal.TEN.pow(annotation.decimalDigits());
+                }
+            }
+
+            fields.add(new FieldMetadata(declaredFields[i], annotation, sizes[i], baseLengths[i], layout.offsets()[i],
+                    scaleFactor, isNumericPicture(annotation.picture())));
+        }
+
+        return new ClassLayout(fields, layout.totalSize());
     }
 
     /**
-     * Compute the total byte size of a nested class by summing its COBOL field lengths.
-     * Uses direct reflection instead of {@link #getFieldMetadata} to avoid recursive
-     * {@code ConcurrentHashMap.computeIfAbsent} calls.
+     * Compute the total byte size of a nested class, honoring REDEFINES so that alternate
+     * views share storage instead of accumulating additional space.
      */
     private static int computeNestedClassSize(Class<?> clazz) {
-        return Arrays.stream(clazz.getDeclaredFields())
-                .filter(f -> f.isAnnotationPresent(CobolField.class))
-                .mapToInt(f -> {
-                    CobolField ann = f.getAnnotation(CobolField.class);
-                    int base;
-                    if (f.getType().isArray() && isNestedClassType(f.getType().getComponentType())) {
-                        base = computeNestedClassSize(f.getType().getComponentType());
-                    } else {
-                        base = CobolFieldUtil.calculateFieldLength(ann);
-                    }
-                    return base * Math.max(1, ann.occurs());
-                })
-                .sum();
-    }
-
-    /**
-     * Calculate total serialized size for pre-allocation.
-     */
-    private int calculateTotalSize(List<FieldMetadata> fields) {
-        return fields.stream()
-                .mapToInt(FieldMetadata::fieldSize)
-                .sum();
+        return FIELD_CACHE.get(clazz).totalSize();
     }
 
     private void validatePojo(Object pojo) throws SerializationException {

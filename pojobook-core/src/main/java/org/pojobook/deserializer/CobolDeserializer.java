@@ -24,11 +24,18 @@ import java.util.Map;
  */
 public class CobolDeserializer {
 
-    // Cache for field metadata to avoid repeated reflection and prevent classloader leaks
-    private static final ClassValue<List<FieldMetadata>> FIELD_CACHE = new ClassValue<>() {
+    /**
+     * Cached, REDEFINES-aware layout for a class: field metadata (including offset) plus
+     * the total serialized size of the class.
+     */
+    private record ClassLayout(List<FieldMetadata> fields, int totalSize) {
+    }
+
+    // Cache for field metadata/layout to avoid repeated reflection and prevent classloader leaks
+    private static final ClassValue<ClassLayout> FIELD_CACHE = new ClassValue<>() {
         @Override
-        protected List<FieldMetadata> computeValue(Class<?> clazz) {
-            return computeFieldMetadataStatic(clazz);
+        protected ClassLayout computeValue(Class<?> clazz) {
+            return computeClassLayoutStatic(clazz);
         }
     };
 
@@ -41,17 +48,6 @@ public class CobolDeserializer {
         protected Boolean computeValue(Class<?> type) {
             return Arrays.stream(type.getDeclaredFields())
                     .anyMatch(f -> f.isAnnotationPresent(CobolField.class));
-        }
-    };
-
-    // Cache for nested class length to avoid repeated reflection + calculation and prevent classloader leaks
-    private static final ClassValue<Integer> NESTED_CLASS_LENGTH_CACHE = new ClassValue<>() {
-        @Override
-        protected Integer computeValue(Class<?> clazz) {
-            return Arrays.stream(clazz.getDeclaredFields())
-                    .filter(field -> field.isAnnotationPresent(CobolField.class))
-                    .mapToInt(field -> calculateFieldLengthStatic(field, field.getAnnotation(CobolField.class)))
-                    .sum();
         }
     };
 
@@ -80,8 +76,11 @@ public class CobolDeserializer {
 
     /**
      * Cached field metadata for performance.
+     *
+     * @param offset start offset of this field within its enclosing class/record, computed with
+     *               REDEFINES awareness (alternate views share the same offset)
      */
-    private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength,
+    private record FieldMetadata(Field field, CobolField annotation, int fieldSize, int baseLength, int offset,
                                  Class<?> fieldType, boolean isNumeric, boolean isString, int typeCategory) {
         public FieldMetadata {
             field.setAccessible(true);
@@ -101,15 +100,14 @@ public class CobolDeserializer {
         T instance = createInstance(clazz);
 
         List<FieldMetadata> fields = getFieldMetadata(clazz);
-        int offset = startOffset;
 
         for (FieldMetadata fieldMeta : fields) {
+            int offset = startOffset + fieldMeta.offset;
             validateDataLength(data, offset, fieldMeta.fieldSize, limit, fieldMeta.field.getName());
 
             Object value = deserializeFieldWithMeta(data, offset, fieldMeta, charset);
 
             setFieldValue(fieldMeta.field, instance, value);
-            offset += fieldMeta.fieldSize;
         }
 
         return instance;
@@ -138,10 +136,17 @@ public class CobolDeserializer {
     }
 
     /**
+     * Get cached class layout or compute and cache it.
+     */
+    private ClassLayout getClassLayout(Class<?> clazz) {
+        return FIELD_CACHE.get(clazz);
+    }
+
+    /**
      * Get cached field metadata or compute and cache it.
      */
     private List<FieldMetadata> getFieldMetadata(Class<?> clazz) {
-        return FIELD_CACHE.get(clazz);
+        return getClassLayout(clazz).fields();
     }
 
     private static int calculateFieldLengthStatic(Field field, CobolField cobolField) {
@@ -153,33 +158,57 @@ public class CobolDeserializer {
     }
 
     /**
-     * Compute field metadata for a class.
+     * Compute field metadata and REDEFINES-aware layout for a class.
      */
-    private static List<FieldMetadata> computeFieldMetadataStatic(Class<?> clazz) {
-        return Arrays.stream(clazz.getDeclaredFields())
+    private static ClassLayout computeClassLayoutStatic(Class<?> clazz) {
+        Field[] declaredFields = Arrays.stream(clazz.getDeclaredFields())
                 .filter(f -> f.isAnnotationPresent(CobolField.class))
-                .map(f -> {
-                    CobolField annotation = f.getAnnotation(CobolField.class);
-                    int size = calculateFieldLengthStatic(f, annotation);
+                .toArray(Field[]::new);
 
-                    // Calculate base length (single occurrence)
-                    int baseLength;
-                    if (f.getType().isArray() && isNestedClassType(f.getType().getComponentType())) {
-                        baseLength = calculateNestedClassLength(f.getType().getComponentType());
-                    } else {
-                        baseLength = CobolFieldUtil.calculateFieldLength(annotation);
-                    }
+        int n = declaredFields.length;
+        CobolField[] annotations = new CobolField[n];
+        int[] baseLengths = new int[n];
+        int[] sizes = new int[n];
+        String[] names = new String[n];
+        String[] redefinesTargets = new String[n];
+        Class<?>[] fieldTypes = new Class<?>[n];
+        boolean[] isNumericFlags = new boolean[n];
+        boolean[] isStringFlags = new boolean[n];
+        int[] typeCategories = new int[n];
 
-                    // Cache type information
-                    Class<?> fieldType = f.getType();
-                    Class<?> componentType = fieldType.isArray() ? fieldType.getComponentType() : fieldType;
-                    boolean isNumeric = isNumericType(componentType);
-                    boolean isString = componentType == String.class;
-                    int typeCategory = classifyType(componentType);
+        for (int i = 0; i < n; i++) {
+            Field f = declaredFields[i];
+            CobolField annotation = f.getAnnotation(CobolField.class);
+            annotations[i] = annotation;
 
-                    return new FieldMetadata(f, annotation, size, baseLength, fieldType, isNumeric, isString, typeCategory);
-                })
-                .toList();
+            int baseLength;
+            if (f.getType().isArray() && isNestedClassType(f.getType().getComponentType())) {
+                baseLength = calculateNestedClassLength(f.getType().getComponentType());
+            } else {
+                baseLength = CobolFieldUtil.calculateFieldLength(annotation);
+            }
+            baseLengths[i] = baseLength;
+            sizes[i] = baseLength * Math.max(1, annotation.occurs());
+            names[i] = annotation.name().isEmpty() ? f.getName() : annotation.name();
+            redefinesTargets[i] = annotation.redefines();
+
+            Class<?> fieldType = f.getType();
+            Class<?> componentType = fieldType.isArray() ? fieldType.getComponentType() : fieldType;
+            fieldTypes[i] = fieldType;
+            isNumericFlags[i] = isNumericType(componentType);
+            isStringFlags[i] = componentType == String.class;
+            typeCategories[i] = classifyType(componentType);
+        }
+
+        CobolFieldUtil.LayoutResult layout = CobolFieldUtil.computeLayout(names, redefinesTargets, sizes);
+
+        List<FieldMetadata> fields = new java.util.ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            fields.add(new FieldMetadata(declaredFields[i], annotations[i], sizes[i], baseLengths[i],
+                    layout.offsets()[i], fieldTypes[i], isNumericFlags[i], isStringFlags[i], typeCategories[i]));
+        }
+
+        return new ClassLayout(fields, layout.totalSize());
     }
 
     /**
@@ -500,11 +529,12 @@ public class CobolDeserializer {
     }
 
     /**
-     * Calculate the total length of a nested class by summing all its fields.
+     * Calculate the total length of a nested class, honoring REDEFINES so that alternate
+     * views share storage instead of accumulating additional space.
      * Result is cached per class to avoid repeated reflection scans.
      */
     private static int calculateNestedClassLength(Class<?> clazz) {
-        return NESTED_CLASS_LENGTH_CACHE.get(clazz);
+        return FIELD_CACHE.get(clazz).totalSize();
     }
 
     /**

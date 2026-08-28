@@ -17,6 +17,17 @@ public class CobolAnnotationGenerator {
      * Create @CobolField annotation for a field definition.
      */
     public AnnotationSpec createCobolFieldAnnotation(FieldDefinition field) {
+        return createCobolFieldAnnotation(field, field.getRedefines());
+    }
+
+    /**
+     * Create @CobolField annotation for a field definition, using an explicit REDEFINES target.
+     * <p>
+     * This allows callers (see {@link org.pojobook.generator.RedefinesResolver}) to attach a
+     * resolved REDEFINES target from an enclosing GROUP item that does not itself become a
+     * physical Java field, ensuring the reflection-based runtime can still honor it.
+     */
+    public AnnotationSpec createCobolFieldAnnotation(FieldDefinition field, String redefines) {
         AnnotationSpec.Builder builder = AnnotationSpec.builder(CobolField.class)
                 .addMember("level", "$L", field.getLevel())
                 .addMember("name", "$S", field.getName())
@@ -30,9 +41,11 @@ public class CobolAnnotationGenerator {
         addOptionalMember(builder, "signPosition", field.getSignPosition());
         addOptionalMemberIf(builder, "signSeparate", field.isSignSeparate(), Boolean::booleanValue);
         addOptionalMemberIf(builder, "occurs", field.getOccurs(), o -> o > 1);
+        addOptionalMember(builder, "redefines", redefines);
 
         return builder.build();
     }
+
 
     /**
      * Add optional string member to annotation builder.
