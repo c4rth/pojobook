@@ -44,8 +44,10 @@ public class DeserializationMethodsGenerator {
      * Add deserialization methods to the class.
      */
     public void addDeserializeMethods(TypeSpec.Builder builder, String className, List<FieldNode> fieldTree) {
+        int totalSize = offsetCalculator.calculateNestedClassSize(fieldTree);
+
         addDeserializeWithDefaultCharset(builder, className);
-        addDeserializeWithCharset(builder, className);
+        addDeserializeWithCharset(builder, className, totalSize);
         addDeserializeFromBuffer(builder, className, fieldTree);
     }
 
@@ -65,7 +67,7 @@ public class DeserializationMethodsGenerator {
         builder.addMethod(method);
     }
 
-    private void addDeserializeWithCharset(TypeSpec.Builder builder, String className) {
+    private void addDeserializeWithCharset(TypeSpec.Builder builder, String className, int totalSize) {
         MethodSpec.Builder method = MethodSpec.methodBuilder("deserialize")
                 .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
                 .returns(ClassName.bestGuess(className))
@@ -73,11 +75,16 @@ public class DeserializationMethodsGenerator {
                 .addParameter(Charset.class, "charset")
                 .addException(DeserializationException.class)
                 .addJavadoc("Deserialize COBOL binary data to create an instance of this class.\n")
+                .addJavadoc("<p>If {@code data} is shorter than the record length defined by the copybook, it is\n")
+                .addJavadoc("space-padded to the required length before deserialization, matching common\n")
+                .addJavadoc("COBOL/JRecord tolerant behavior for short/truncated records.\n")
                 .addJavadoc("@param data byte array containing the serialized data\n")
                 .addJavadoc("@return deserialized instance\n")
                 .addJavadoc("@throws DeserializationException if deserialization fails\n");
 
-        method.addStatement("return deserializeFromBuffer(data, 0, charset)");
+        method.addStatement("byte[] paddedData = $T.padToLength(data, $L, charset)",
+                CobolFieldDeserializer.class, totalSize);
+        method.addStatement("return deserializeFromBuffer(paddedData, 0, charset)");
 
         builder.addMethod(method.build());
     }

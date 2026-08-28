@@ -21,7 +21,7 @@
         <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <mapstruct.version>1.6.3</mapstruct.version>
-        <jrecord.version>0.93.3</jrecord.version>
+        <jrecord.version>0.93</jrecord.version>
     </properties>
 
     <dependencyManagement>
@@ -30,15 +30,11 @@
                 <groupId>net.sf</groupId>
                 <artifactId>jrecord</artifactId>
                 <version>${jrecord.version}</version>
-                <scope>system</scope>
-                <systemPath>${project.basedir}/../../jrecord-lib/JRecord.jar</systemPath>
             </dependency>
             <dependency>
                 <groupId>net.sf</groupId>
                 <artifactId>jrecord-cb2xml</artifactId>
                 <version>${jrecord.version}</version>
-                <scope>system</scope>
-                <systemPath>${project.basedir}/../../jrecord-lib/cb2xml.jar</systemPath>
             </dependency>
             <dependency>
                 <groupId>org.mapstruct</groupId>

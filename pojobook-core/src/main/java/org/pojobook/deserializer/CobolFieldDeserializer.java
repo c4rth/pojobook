@@ -3,11 +3,14 @@ package org.pojobook.deserializer;
 import org.pojobook.util.CharsetMode;
 import org.pojobook.util.DisplayNumericUtil;
 import org.pojobook.util.SignedNumericUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.nio.charset.Charset;
+import java.util.Arrays;
 
 /**
  * Helper class containing COBOL field deserialization methods.
@@ -15,6 +18,42 @@ import java.nio.charset.Charset;
  * and StandaloneSerializationPojoGenerator (for code generation).
  */
 public class CobolFieldDeserializer {
+
+    private static final Logger logger = LoggerFactory.getLogger(CobolFieldDeserializer.class);
+
+    /**
+     * Ensure the given buffer is at least {@code requiredLength} bytes long, padding with the
+     * charset-appropriate space byte if it is shorter.
+     * <p>
+     * COBOL records are fixed-length, but source data (e.g. from a message queue, a variable-length
+     * file, or a shorter test payload) is sometimes shorter than the full copybook layout. Rather than
+     * throwing an {@link ArrayIndexOutOfBoundsException} while reading trailing fields, this mirrors
+     * common COBOL/JRecord tolerant behavior: missing trailing bytes are treated as blank (space-filled).
+     *
+     * @param data           source byte array, possibly shorter than the record layout
+     * @param requiredLength the total record length expected by the copybook
+     * @param charset        character encoding, used to select the correct space byte value
+     * @return {@code data} unchanged if already long enough, otherwise a new, space-padded array
+     */
+    public static byte[] padToLength(byte[] data, int requiredLength, Charset charset) {
+        if (data.length == requiredLength) {
+            return data;
+        }
+        if (data.length > requiredLength) {
+            logger.warn("Input data length {} exceeds required record length {}; using the original data.",
+                    data.length, requiredLength);
+            return data;
+        }
+        logger.warn("Input data length {} is less than required record length {}; padding missing trailing bytes with spaces.",
+                data.length, requiredLength);
+
+        int mode = CharsetMode.detect(charset);
+        byte fillByte = mode == CharsetMode.UNKNOWN ? (byte) ' ' : CharsetMode.spaceByte(mode);
+        byte[] padded = new byte[requiredLength];
+        Arrays.fill(padded, fillByte);
+        System.arraycopy(data, 0, padded, 0, data.length);
+        return padded;
+    }
 
     /**
      * Deserialize a DISPLAY string field.

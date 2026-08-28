@@ -89,9 +89,16 @@ public class CobolDeserializer {
 
     /**
      * Deserialize COBOL binary data to a POJO.
+     * <p>If {@code data} is shorter than the total record length defined by the class's
+     * {@code @CobolField} layout, it is space-padded to the required length before
+     * deserialization, matching common COBOL/JRecord tolerant behavior for short/truncated
+     * records.
      */
     public <T> T deserialize(byte[] data, Class<T> clazz, Charset charset) throws DeserializationException {
-        return deserializeInternal(data, 0, data.length, clazz, charset);
+        validateClass(clazz);
+        int totalSize = getClassLayout(clazz).totalSize();
+        byte[] paddedData = CobolFieldDeserializer.padToLength(data, totalSize, charset);
+        return deserializeInternal(paddedData, 0, paddedData.length, clazz, charset);
     }
 
     private <T> T deserializeInternal(byte[] data, int startOffset, int limit, Class<T> clazz, Charset charset)

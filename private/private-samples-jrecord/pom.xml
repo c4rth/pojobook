@@ -20,12 +20,10 @@
         <dependency>
             <groupId>net.sf</groupId>
             <artifactId>jrecord</artifactId>
-            <scope>system</scope>
         </dependency>
         <dependency>
             <groupId>net.sf</groupId>
             <artifactId>jrecord-cb2xml</artifactId>
-            <scope>system</scope>
         </dependency>
         <dependency>
             <groupId>org.pojobook</groupId>

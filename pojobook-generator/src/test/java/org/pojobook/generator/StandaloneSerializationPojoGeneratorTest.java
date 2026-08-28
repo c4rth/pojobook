@@ -161,7 +161,7 @@ class StandaloneSerializationPojoGeneratorTest {
         // Check for serialization in nested class
         assertTrue(generatedCode.contains("Department.deserializeFromBuffer(data,"));
         assertTrue(generatedCode.contains("private static CompanyRecord deserializeFromBuffer(byte[] data, int offset, Charset charset)"));
-        assertTrue(generatedCode.contains("return deserializeFromBuffer(data, 0, charset);"));
+        assertTrue(generatedCode.contains("return deserializeFromBuffer(paddedData, 0, charset);"));
         assertTrue(generatedCode.contains("CobolFieldDeserializer.deserializeDisplayInteger(data,"));
         assertFalse(generatedCode.contains("Integer.parseInt(strVal_"));
         assertFalse(generatedCode.contains("Arrays.copyOfRange"));
